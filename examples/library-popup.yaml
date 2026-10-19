@@ -1,0 +1,10 @@
+type: vertical-stack
+cards:
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#library"
+    name: Library
+  - type: custom:origami-music
+    layout: library
+    back_path: "#music"
+    entity: media_player.living_room

@@ -1,0 +1,5 @@
+[
+  { "name": "hero", "fixture": "home" },
+  { "name": "popup", "fixture": "popup", "height": 1500 },
+  { "name": "library", "fixture": "library-popup", "height": 1200 }
+]

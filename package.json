@@ -1,0 +1,17 @@
+{
+  "name": "origami-music",
+  "version": "0.6.0",
+  "description": "Music Assistant cards for Home Assistant in the Origami style: now playing, speakers, queue and library",
+  "license": "MIT",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "test": "playwright test",
+    "check": "node scripts/check-style.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "devDependencies": {
+    "@mdi/js": "^7.4.47",
+    "@playwright/test": "^1.64.1"
+  }
+}

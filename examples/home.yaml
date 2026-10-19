@@ -1,0 +1,10 @@
+type: vertical-stack
+cards:
+  - type: custom:origami-music
+    layout: banner
+    entity: media_player.living_room
+    navigation_path: "#music"
+  - type: custom:origami-music
+    layout: shelf
+    entity: media_player.living_room
+    limit: 6
