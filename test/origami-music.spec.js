@@ -143,3 +143,44 @@ test("an error from Home Assistant shows on the card", async ({ page }) => {
   await open(page, "fixture=library&error=Unauthorized");
   await expect(card(page, "library")).toContainText("Error: Unauthorized");
 });
+
+test("a search result plays next, right after the current track", async ({ page }) => {
+  await open(page, "fixture=library");
+  const library = card(page, "library");
+  await library.locator(".search input").fill("golden");
+  await library.locator('.act[data-act="next"][data-id="library://track/100"]').click();
+  expect(await page.evaluate(() => window.calls)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "library://track/100", enqueue: "next" }) }));
+  await expect(library.locator(".toast")).toHaveText("Will play next on Living room");
+  await expect(library.locator(".toast")).toBeInViewport();
+});
+
+test("the library keeps its rows while a search loads", async ({ page }) => {
+  await open(page, "fixture=library&slow");
+  const library = card(page, "library");
+  await expect(library.locator(".pl")).toHaveCount(4);
+  await library.locator(".search input").fill("lanterns");
+  await expect(library.locator(".libbody.busy")).toHaveCount(1);
+  await expect(library.locator(".pl")).toHaveCount(4);
+  await expect(library.locator(".section").first()).toHaveText("Artists");
+  await expect(library.locator(".libbody.busy")).toHaveCount(0);
+});
+
+test("a solo speaker stays out of groups", async ({ page }) => {
+  await open(page, "fixture=speakers&solo=media_player.bathroom");
+  const speakers = card(page, "speakers");
+  const bathroom = speakers.locator('.spk[data-p="media_player.bathroom"]');
+  await expect(bathroom).toContainText("no groups");
+  await bathroom.locator(".chk.na").click();
+  await expect(speakers.locator(".toast")).toHaveText("Bathroom can't join a group");
+  expect(await page.evaluate(() => window.calls.filter((c) => c.service === "join"))).toEqual([]);
+});
+
+test("every player of a group reports the same members, and the first one leads", async ({ page }) => {
+  await open(page, "fixture=speakers");
+  const speakers = card(page, "speakers");
+  await expect(speakers.locator('.spk[data-p="media_player.living_room"] .badge ha-icon')).toHaveAttribute("icon", "mdi:crown");
+  await expect(speakers.locator('.spk[data-p="media_player.kitchen"] .badge ha-icon')).toHaveAttribute("icon", "mdi:link-variant");
+  await expect(speakers.locator('.spk[data-p="media_player.kitchen"]')).toContainText("With Living room");
+});
+

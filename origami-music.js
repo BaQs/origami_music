@@ -8,7 +8,7 @@
  *   media_player.living_room_cast: media_player.living_room
  * entity: media_player.living_room            # without select, the Music Assistant player to follow
  */
-const ORIGAMI_MUSIC_VERSION = "0.6.0";
+const ORIGAMI_MUSIC_VERSION = "0.7.0";
 
 function resolvePlayer(config, states) {
   const sel = config.select ? states?.[config.select]?.state : null;
@@ -80,30 +80,32 @@ const ORIGAMI_MUSIC_TEXT = {
     none: "Aucune file", empty: "File vide", load: "Chargement…", one: " titre à venir", many: " titres à venir",
     last: "Dernier titre", err: "Erreur : ", nosel: "Aucune enceinte choisie", noent: "Lecteur introuvable : ",
     tabs: { queue: "File", browse: "Bibliothèque", search: "Recherche" }, back: "Retour", play: "Jouer",
-    add: "Ajouter à la file", placeholder: "Artiste, album, titre…", noresult: "Aucun résultat", nothing: "Rien ici",
+    next: "Lire ensuite", placeholder: "Artiste, album, titre…", noresult: "Aucun résultat", nothing: "Rien ici",
     cat: { artists: "Artistes", albums: "Albums", tracks: "Titres", playlists: "Playlists", radio: "Radios",
            podcasts: "Podcasts", audiobooks: "Livres audio" },
     cls: { artist: "Artistes", album: "Albums", track: "Titres", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
-    sent: "Envoyé à ", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
+    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
     speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
+    nogroup: "sans groupe", solo: " ne peut pas rejoindre de groupe", sololead: " joue seule : pas de groupe possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artiste", track: "Titre", radio: "Radio", podcast: "Podcast", audiobook: "Livre audio" },
   },
   en: {
     none: "No queue", empty: "Queue empty", load: "Loading…", one: " item up next", many: " items up next",
     last: "Last item", err: "Error: ", nosel: "No speaker selected", noent: "Player not found: ",
     tabs: { queue: "Now playing", browse: "Library", search: "Search" }, back: "Back", play: "Play",
-    add: "Add to queue", placeholder: "Artist, album, track…", noresult: "No results", nothing: "Nothing here",
+    next: "Play next", placeholder: "Artist, album, track…", noresult: "No results", nothing: "Nothing here",
     cat: { artists: "Artists", albums: "Albums", tracks: "Tracks", playlists: "Playlists", radio: "Radio",
            podcasts: "Podcasts", audiobooks: "Audiobooks" },
     cls: { artist: "Artists", album: "Albums", track: "Tracks", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
-    sent: "Sent to ", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
+    sent: "Sent to ", playnext: "Will play next on ", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
     speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
+    nogroup: "no groups", solo: " can't join a group", sololead: " plays alone, so no group is possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artist", track: "Track", radio: "Radio", podcast: "Podcast", audiobook: "Audiobook" },
   },
 };
@@ -238,7 +240,10 @@ class OrigamiMusic extends OrigamiBase {
     const ma = this._ctx?.ma;
     if (!ma || !id) return;
     this._hass.callService("media_player", "play_media", { entity_id: ma, media_content_id: id, media_content_type: type ?? "music", enqueue })
-      .then(() => this._toast(this._t().sent + (this._ctx.st?.attributes?.friendly_name ?? ma)))
+      .then(() => {
+        this._toast((enqueue === "next" ? this._t().playnext : this._t().sent) + (this._names()[ma] ?? this._ctx.st?.attributes?.friendly_name ?? ma));
+        this._m.at = 0;
+      })
       .catch((e) => this._toast(this._t().err + (e?.message ?? e)));
   }
 
@@ -329,7 +334,7 @@ class OrigamiMusic extends OrigamiBase {
     else if (d.act === "back") { this._stack.pop(); this._sig = null; this._render(); }
     else if (d.act === "open") this._browse(d.id, d.type, d.title);
     else if (d.act === "play") this._play(d.id, d.type, "play");
-    else if (d.act === "add") this._play(d.id, d.type, "add");
+    else if (d.act === "next") this._play(d.id, d.type, "next");
     else if (d.act === "play-now") this._play(d.id, d.type, "replace");
   }
 
@@ -408,7 +413,7 @@ class OrigamiMusic extends OrigamiBase {
     row.append(this._thumb(c.thumbnail, ORIGAMI_MUSIC_ICONS[c.media_class] ?? "mdi:music-note"), text);
     if (c.can_play) {
       const acts = this._el("div", "acts");
-      for (const [act, icon, label] of [["add", "mdi:playlist-plus", t.add], ["play", "mdi:play", t.play]]) {
+      for (const [act, icon, label] of [["next", "mdi:skip-next", t.next], ["play", "mdi:play", t.play]]) {
         const b = this._el("div", "act" + (act === "play" ? " main" : ""));
         Object.assign(b.dataset, { act, id, type });
         b.title = label;
@@ -573,12 +578,13 @@ class OrigamiMusic extends OrigamiBase {
     return out;
   }
 
-  // Music Assistant groups: leader -> members and member -> leader. The leader's group_members may include itself.
+  // Music Assistant groups: leader -> members and member -> leader. Every player in a group reports the same
+  // group_members list, and the leader comes first.
   _groups() {
     const S = this._hass.states, lead = {}, mem = {};
     for (const ma of Object.values(this._config.players ?? {})) {
-      const g = (S[ma]?.attributes?.group_members ?? []).filter((x) => x !== ma);
-      if (g.length) { lead[ma] = g; for (const x of g) mem[x] = ma; }
+      const gm = S[ma]?.attributes?.group_members ?? [];
+      if (gm.length > 1 && gm[0] === ma) { const g = gm.slice(1); lead[ma] = g; for (const x of g) mem[x] = ma; }
     }
     return { lead, mem };
   }
@@ -710,6 +716,9 @@ class OrigamiMusic extends OrigamiBase {
     const t = this._t(), cfg = this._config, S = this._hass.states;
     const names = this._names(), { lead, mem } = this._groups();
     const leader = mem[this._ctx.ma] ?? this._ctx.ma;
+    // solo: speakers that cannot play in sync with others, such as an old Chromecast built-in
+    const solo = new Set(cfg.solo ?? []), alone = (cast, p) => solo.has(p) || solo.has(cast);
+    const leaderAlone = Object.entries(cfg.players ?? {}).some(([cast, p]) => p === leader && alone(cast, p));
     const rows = Object.entries(cfg.players ?? {}).map(([cast, p]) => {
       const st = S[p], s = st?.state ?? "unavailable", a = st?.attributes ?? {};
       const off = ["unavailable", "unknown"].includes(s);
@@ -717,8 +726,12 @@ class OrigamiMusic extends OrigamiBase {
       const line = off ? t.offline : mem[p] ? t.with + (names[mem[p]] ?? mem[p])
         : ["playing", "buffering"].includes(s) ? title + (lead[p] ? " · " + t.leads : "")
         : s === "paused" ? t.paused + (lead[p] ? " · " + t.leads : "") : lead[p] ? t.leads : t.inactive;
-      return { cast, p, leader: p === leader, on: p === leader || (lead[leader] ?? []).includes(p), badge: lead[p] ? "mdi:crown" : mem[p] ? "mdi:link-variant" : "",
-        line, off, label: names[p] ?? p, vol: a.volume_level != null && !off ? this._pct(a.volume_level) : "–" };
+      const on = p === leader || (lead[leader] ?? []).includes(p);
+      // A speaker that is already in a group keeps its checkbox, so it can still leave
+      const na = !on && (alone(cast, p) || leaderAlone);
+      return { cast, p, leader: p === leader, on, na, badge: lead[p] ? "mdi:crown" : mem[p] ? "mdi:link-variant" : "",
+        line: line + (alone(cast, p) && !off ? " · " + t.nogroup : ""), off, label: names[p] ?? p,
+        vol: a.volume_level != null && !off ? this._pct(a.volume_level) : "–" };
     });
     const sig = "speakers|" + leader + "|" + JSON.stringify(rows);
     if (sig === this._sig) return;
@@ -731,7 +744,8 @@ class OrigamiMusic extends OrigamiBase {
       <div class="sq"><ha-icon icon="mdi:speaker"></ha-icon>${r.badge ? `<span class="badge"><ha-icon icon="${r.badge}"></ha-icon></span>` : ""}</div>
       <div class="text"><div class="title">${omEsc(r.label)}</div><div class="sub">${omEsc(r.line)}</div></div>
       <span class="vp">${omEsc(r.vol)}</span>
-      <div class="chk${r.on ? " on" : ""}${r.leader ? " leader" : ""}" data-chk="1">${r.on ? '<ha-icon icon="mdi:check"></ha-icon>' : ""}</div></div>`).join("");
+      <div class="chk${r.on ? " on" : ""}${r.leader ? " leader" : ""}${r.na ? " na" : ""}" data-chk="1">${r.on ? '<ha-icon icon="mdi:check"></ha-icon>'
+        : r.na ? '<ha-icon icon="mdi:link-variant-off"></ha-icon>' : ""}</div></div>`).join("");
   }
 
   _speakerClick(ev) {
@@ -741,6 +755,11 @@ class OrigamiMusic extends OrigamiBase {
     const leader = mem[this._ctx?.ma] ?? this._ctx?.ma;
     if (ev.target.closest("[data-chk]")) {
       if (row.classList.contains("off") || !leader || p === leader) return;
+      if (ev.target.closest(".chk.na")) {
+        const t = this._t(), names = this._names(), solo = new Set(this._config.solo ?? []);
+        this._toast(solo.has(p) || solo.has(cast) ? (names[p] ?? p) + t.solo : (names[leader] ?? leader) + t.sololead);
+        return;
+      }
       if ((lead[leader] ?? []).includes(p)) this._call("media_player.unjoin", { entity_id: p });
       else this._call("media_player.join", { entity_id: leader, group_members: [p] });
       return;
@@ -866,8 +885,10 @@ class OrigamiMusic extends OrigamiBase {
     if (sig === this._sigLib) return;
     this._sigLib = sig;
     const body = card.querySelector(".libbody");
+    // While a search loads, the current rows stay (dimmed), so a pop-up around the card keeps its height
+    body.classList.toggle("busy", mode === "search" && srch.loading && body.childElementCount > 0);
     if (mode === "search") {
-      if (srch.loading) body.replaceChildren(this._el("div", "hint", t.load));
+      if (srch.loading) { if (!body.childElementCount) body.replaceChildren(this._el("div", "hint", t.load)); }
       else if (srch.err) body.replaceChildren(this._el("div", "hint error", t.err + srch.err));
       else if (!srch.results?.length) body.replaceChildren(this._el("div", "hint", srch.results ? t.noresult : ""));
       else {
@@ -909,7 +930,7 @@ class OrigamiMusic extends OrigamiBase {
       text.append(this._el("div", "title", it.name ?? ""),
         this._el("div", "sub", (it.artists ?? []).map((x) => x?.name).filter(Boolean).join(", ") || it.version || t.kind.album));
       const acts = this._el("div", "acts");
-      for (const [act, icon, label] of [["add", "mdi:playlist-plus", t.add], ["play-now", "mdi:play", t.play]]) {
+      for (const [act, icon, label] of [["next", "mdi:skip-next", t.next], ["play-now", "mdi:play", t.play]]) {
         const b = this._el("div", "act" + (act === "play-now" ? " main" : ""));
         Object.assign(b.dataset, { act, id: it.uri, type: "music" });
         b.title = label;
@@ -1116,12 +1137,17 @@ const ORIGAMI_MUSIC_CSS = `
   .chk.on { border: 0; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
   .chk.leader { cursor: default; }
   .spk.off .chk { visibility: hidden; }
+  .chk.na { border-style: dashed; opacity: var(--opacity-disabled, 0.45); cursor: default; color: var(--secondary-text-color); --mdc-icon-size: 18px; }
   ha-card.queue .lst { border-radius: 26px; background: var(--fill-subtle, #eae8e4); padding: 8px; display: flex; flex-direction: column; }
   ha-card.queue .row { padding: 8px; min-height: 0; }
   ha-card.queue .thumb { width: 48px; height: 48px; border-radius: 14px; background: var(--ha-card-background, #fff); box-shadow: 0 2px 6px rgba(74, 70, 64, 0.08); }
   ha-card.queue .title { font-size: 15px; }
   ha-card.queue .sub, ha-card.queue .dur { font-size: 13px; font-weight: 600; }
-  ha-card.library { background: none; box-shadow: none; border: 0; padding: 0; gap: 14px; }
+  ha-card.library { background: none; box-shadow: none; border: 0; padding: 0; gap: 14px;
+    min-height: calc(100vh - 180px); min-height: calc(100dvh - 180px); align-content: start; }
+  .libbody.busy { opacity: 0.45; transition: opacity 0.15s; pointer-events: none; }
+  /* The library can be much taller than the screen, so its message stays at the bottom of the visible area */
+  ha-card.library .toast { position: fixed; bottom: 24px; z-index: 5; }
   .now { align-self: flex-start; display: flex; align-items: center; gap: 8px; height: 40px; box-sizing: border-box; padding: 0 16px 0 12px;
     border-radius: 999px; background: var(--ha-card-background, #fff); box-shadow: var(--card-elevation-flat, 0 4px 12px rgba(74, 70, 64, 0.08));
     font-size: 15px; font-weight: 700; color: var(--primary-text-color); cursor: pointer; max-width: 100%; --mdc-icon-size: 20px; }

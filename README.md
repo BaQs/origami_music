@@ -13,7 +13,7 @@ Download Origami Music in HACS. If HACS asks you to add the repository, select *
 
 <br>
 
-Download `origami-music.js` from the [latest release](https://github.com/BaQs/origami_music/releases/latest) into `config/www/` and add `/local/origami-music.js?v=0.6.0` as a JavaScript module in **Settings** > **Dashboards** > **Resources**. Change the version after each update, otherwise your browser keeps using the old file.
+Download `origami-music.js` from the [latest release](https://github.com/BaQs/origami_music/releases/latest) into `config/www/` and add `/local/origami-music.js?v=0.7.0` as a JavaScript module in **Settings** > **Dashboards** > **Resources**. Change the version after each update, otherwise your browser keeps using the old file.
 
 </details>
 
@@ -42,7 +42,7 @@ The banner shows the track that plays on a Music Assistant player, or offers to 
 | `player` | The track, the group, the progress, shuffle, repeat and the volume |
 | `speakers` | Every speaker with what it plays and its volume. A tap chooses it, the checkbox groups it with the chosen speaker. |
 | `queue` | The tracks after the current one. A tap plays one. |
-| `library` | Search, categories, and the playlists and albums played last |
+| `library` | Search, categories, and the playlists and albums played last. Each result plays now or right after the current track. |
 | none | The tabbed card: queue, library and search in one card |
 
 </details>
@@ -128,6 +128,7 @@ entity: media_player.living_room
 | `select` | | An `input_select` that holds the chosen speaker |
 | `players` | | The speakers of the `input_select`, each with its Music Assistant player |
 | `names` | | Short names for the speakers |
+| `solo` | | Speakers that cannot play in a group, such as an old Chromecast built-in. Their checkbox is turned off. |
 | `navigation_path` | | Opened by a tap on the banner |
 | `speaker` | `true` | The banner shows the name of the speaker |
 | `limit` | `10` | The number of tracks in the queue, or of albums and playlists on the shelf |
@@ -143,7 +144,7 @@ entity: media_player.living_room
 
 <br>
 
-The banner, the shelf and the library read the albums and playlists played last with the `music_assistant.get_library` action, once every 10 minutes for all the cards of a page. The library and the search use the media browser of Home Assistant. The queue comes from Bubble Card Tools, which reads the Music Assistant queue and also signs cover images, so that an http image shows on an https dashboard. The texts follow the language of Home Assistant, in English or French.
+The banner, the shelf and the library read the albums and playlists played last with the `music_assistant.get_library` action, once every 10 minutes for all the cards of a page. The library and the search use the media browser of Home Assistant. The queue comes from Bubble Card Tools, which reads the Music Assistant queue and also signs cover images, so that an http image shows on an https dashboard. Every player of a Music Assistant group reports the same members, and the first one leads the group. The texts follow the language of Home Assistant, in English or French.
 
 </details>
 

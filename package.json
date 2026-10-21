@@ -1,6 +1,6 @@
 {
   "name": "origami-music",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Music Assistant cards for Home Assistant in the Origami style: now playing, speakers, queue and library",
   "license": "MIT",
   "private": true,

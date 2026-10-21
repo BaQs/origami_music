@@ -39,7 +39,9 @@ const states = (idle) => {
     "input_select.speaker": { state: "media_player.living_room_speaker", attributes: { options: Object.keys(PLAYERS) } },
     "media_player.living_room": { state: playing.state, attributes: { ...playing, friendly_name: "Living room", volume_level: 0.32,
       shuffle: false, repeat: "all", active_queue: "queue-living-room", group_members: idle ? [] : ["media_player.living_room", "media_player.kitchen"] } },
-    "media_player.kitchen": { state: playing.state, attributes: { ...playing, friendly_name: "Kitchen", volume_level: 0.25, group_members: [] } },
+    // Music Assistant reports the same group_members list on every player of a group, with the leader first
+    "media_player.kitchen": { state: playing.state, attributes: { ...playing, friendly_name: "Kitchen", volume_level: 0.25,
+      group_members: idle ? [] : ["media_player.living_room", "media_player.kitchen"] } },
     "media_player.bedroom": { state: "idle", attributes: { friendly_name: "Bedroom", volume_level: 0.18 } },
     "media_player.bathroom": { state: "paused", attributes: { friendly_name: "Bathroom", volume_level: 0.4, media_title: "Morning Rain" } },
     "media_player.office": { state: "unavailable", attributes: { friendly_name: "Office" } },
@@ -81,10 +83,14 @@ const sheet = (column, title) => {
   return el;
 };
 
+// slow: the search answers after a second, so a test can look at the card while it loads
+const slowWs = { ...ws, "media_player/search_media": (m) => new Promise((r) => setTimeout(() => r(ws["media_player/search_media"](m)), 1000)) };
+
 export async function show(name, params, column) {
-  const hass = createHass({ states: states(params.has("idle")), ws, language: params.get("lang") ?? "en" });
+  const hass = createHass({ states: states(params.has("idle")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
   if (params.get("error")) hass.callWS = () => Promise.reject(new Error(params.get("error")));
-  const add = (config) => mount("origami-music", { ...BASE, ...config }, hass, column);
+  const extra = params.get("solo") ? { solo: [params.get("solo")] } : {};
+  const add = (config) => mount("origami-music", { ...BASE, ...extra, ...config }, hass, column);
   if (name === "home") {
     await add({ layout: "banner", navigation_path: "#music" });
     return add({ layout: "shelf", limit: 6 });
