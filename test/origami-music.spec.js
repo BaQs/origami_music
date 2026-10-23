@@ -305,3 +305,58 @@ test("the music pop-up speaks French with a French Home Assistant", async ({ pag
   await expect(app).toContainText("Tendances du moment");
   await expect(app.locator(".maj")).toHaveText("Mis à jour aujourd'hui");
 });
+
+test("the volume of a group moves every speaker of the group by the same step", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const vol = card(page, "nowp").locator(".vrow .vol");
+  await expect(vol.locator(".vpct")).toContainText("Group · ");
+  const box = await vol.boundingBox();
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
+  await expect.poll(async () => (await calls(page)).filter((c) => c.service === "volume_set").map((c) => c.data.entity_id).sort())
+    .toEqual(["media_player.kitchen", "media_player.living_room"]);
+  const set = Object.fromEntries((await calls(page)).filter((c) => c.service === "volume_set").map((c) => [c.data.entity_id, c.data.volume_level]));
+  expect(set["media_player.living_room"] - set["media_player.kitchen"]).toBeCloseTo(0.07, 2);
+});
+
+test("the volume panel has presets and a slider for each speaker", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const now = card(page, "nowp");
+  await expect(now.locator(".vpanel")).toBeHidden();
+  await now.locator(".vmore").click();
+  await expect(now.locator(".mvol")).toHaveCount(2);
+  await expect(now.locator(".mvol").first()).toContainText("Living room");
+  await now.locator(".preset", { hasText: "Medium" }).click();
+  const done = await calls(page);
+  for (const entity_id of ["media_player.living_room", "media_player.kitchen"]) {
+    expect(done).toContainEqual(expect.objectContaining({ service: "volume_set", data: { entity_id, volume_level: 0.3 } }));
+  }
+});
+
+test("also play on adds a speaker to the group, takes one out, adds them all or splits the group", async ({ page }) => {
+  await open(page, "fixture=group");
+  const group = card(page, "group");
+  await expect(group.locator(".gchip.on")).toHaveText("Kitchen");
+  await expect(group.locator('.gchip[data-p="media_player.office"]')).toHaveClass(/na/);
+  await group.locator(".gchip", { hasText: "Bedroom" }).click();
+  await group.locator(".gchip", { hasText: "Kitchen" }).click();
+  await group.locator('.gchip[data-g="all"]').click();
+  await group.locator('[data-g="split"]').click();
+  await group.locator(".gchip", { hasText: "Office" }).click();
+  const done = (await calls(page)).filter((c) => ["join", "unjoin"].includes(c.service)).map((c) => [c.service, c.data]);
+  expect(done).toEqual([
+    ["join", { entity_id: "media_player.living_room", group_members: ["media_player.bedroom"] }],
+    ["unjoin", { entity_id: "media_player.kitchen" }],
+    ["join", { entity_id: "media_player.living_room", group_members: ["media_player.bedroom", "media_player.bathroom"] }],
+    ["unjoin", { entity_id: ["media_player.kitchen"] }],
+  ]);
+  await expect(group.locator(".toast")).toHaveText("Office · Offline");
+});
+
+test("a solo speaker is left out of also play on", async ({ page }) => {
+  await open(page, "fixture=group&solo=media_player.bathroom");
+  const group = card(page, "group");
+  await group.locator('.gchip[data-g="all"]').click();
+  expect((await calls(page)).filter((c) => c.service === "join").map((c) => c.data.group_members)).toEqual([["media_player.bedroom"]]);
+  await group.locator(".gchip", { hasText: "Bathroom" }).click();
+  await expect(group.locator(".toast")).toHaveText("Bathroom can't join a group");
+});

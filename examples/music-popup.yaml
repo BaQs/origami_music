@@ -29,6 +29,8 @@ cards:
   - <<: *music
     layout: nowplaying
   - <<: *music
+    layout: group
+  - <<: *music
     layout: queue
     limit: 4
   - type: custom:bubble-card

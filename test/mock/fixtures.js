@@ -156,6 +156,7 @@ export async function show(name, params, column) {
   if (name === "nowplaying-popup") {
     const el = sheet(column, "Now playing");
     await mount("origami-music", { ...BASE, layout: "nowplaying", speakers_path: "#speakers" }, hass, el);
+    await mount("origami-music", { ...BASE, layout: "group" }, hass, el);
     return mount("origami-music", { ...BASE, layout: "queue", limit: 3 }, hass, el);
   }
   if (name === "tabs") return add({});

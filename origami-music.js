@@ -2,7 +2,7 @@
  * Origami Music: Music Assistant cards for Home Assistant in the Origami style. See the README for the options.
  *
  * type: custom:origami-music
- * layout: app                                 # banner, shelf, player, speakers, queue, library, app, nowplaying, or none for the tabbed card
+ * layout: app                                 # banner, shelf, player, speakers, queue, library, app, nowplaying, group, or none (tabs)
  * select: input_select.speaker                # follows the speaker chosen in an input_select
  * players:                                    # chosen speaker -> Music Assistant player
  *   media_player.living_room_cast: media_player.living_room
@@ -144,6 +144,8 @@ const ORIGAMI_MUSIC_TEXT = {
     added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
     like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
     speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…",
+    group: "Groupe", volumes: "Volume de chaque enceinte", quiet: "Doux", medium: "Moyen", loud: "Fort",
+    alsoOn: "Écouter aussi sur", ungroup: "Dégrouper", allSpeakers: "Toutes",
   },
   en: {
     none: "No queue", empty: "Queue empty", load: "Loading…", one: " item up next", many: " items up next",
@@ -167,6 +169,8 @@ const ORIGAMI_MUSIC_TEXT = {
     added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
     like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
     speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…",
+    group: "Group", volumes: "Volume of each speaker", quiet: "Quiet", medium: "Medium", loud: "Loud",
+    alsoOn: "Also play on", ungroup: "Ungroup", allSpeakers: "All",
   },
 };
 
@@ -242,6 +246,7 @@ class OrigamiMusic extends OrigamiBase {
     this._ctx = { chosen, ma, st, qid, cur };
     if (cfg.layout === "app") { this._renderApp(); return; }
     if (cfg.layout === "nowplaying") { this._renderNowPlaying(); return; }
+    if (cfg.layout === "group") { this._renderGroup(); return; }
     if (cfg.layout === "banner") { this._fetchRecent(); this._renderBanner(); return; }
     if (cfg.layout === "shelf") { this._fetchRecent(); this._renderShelf(); return; }
     if (cfg.layout === "player") { this._renderPlayer(); return; }
@@ -736,7 +741,8 @@ class OrigamiMusic extends OrigamiBase {
     rp.classList.toggle("on", a.repeat === "one" || a.repeat === "all");
     card.classList.toggle("dead", !st || ["unavailable", "unknown"].includes(st.state));
     this._setIcon(card.querySelector(".vic"), (a.volume_level ?? 0) < 0.34 ? "mdi:volume-low" : (a.volume_level ?? 0) < 0.67 ? "mdi:volume-medium" : "mdi:volume-high");
-    if (!this._dragVol && this._volLocal == null) this._paintVol(card, a.volume_level ?? 0);
+    const vol = card.querySelector(".vol");
+    if (!vol._drag && vol._local == null) this._paintVol(vol, a.volume_level ?? 0);
     this._tick();
     // The progress moves on its own while playing, and stops once the card is no longer on the page
     if (st?.state === "playing") { if (!this._tickT) this._tickT = setInterval(() => this._tick(), 1000); }
@@ -757,30 +763,31 @@ class OrigamiMusic extends OrigamiBase {
     card.querySelector(".dur").textContent = formatDuration(dur);
   }
 
-  _paintVol(card, v) {
+  _paintVol(vol, v) {
     const pct = Math.round(Math.max(0, Math.min(1, v)) * 100);
-    card.querySelector(".vfill").style.width = pct + "%";
-    card.querySelector(".vknob").style.left = pct + "%";
-    card.querySelector(".vpct").textContent = this._pct(pct / 100);
+    vol.querySelector(".vfill").style.width = pct + "%";
+    vol.querySelector(".vknob").style.left = pct + "%";
+    vol.querySelector(".vpct").textContent = (vol._label ? vol._label + " · " : "") + this._pct(pct / 100);
   }
 
   // The gauge follows the finger at once, the volume is set 150 ms after the last move
-  _wireVolume(vol) {
-    const card = vol.closest("ha-card");
+  // apply gets the new level; without it, the level goes to the followed player
+  _wireVolume(vol, apply) {
     const set = (ev) => {
       const r = vol.getBoundingClientRect();
       const v = Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width));
-      this._volLocal = v;
-      this._paintVol(card, v);
-      clearTimeout(this._volT);
-      this._volT = setTimeout(() => {
+      vol._local = v;
+      this._paintVol(vol, v);
+      clearTimeout(vol._timer);
+      vol._timer = setTimeout(() => {
         const ma = this._ctx?.ma;
-        if (ma) this._call("media_player.volume_set", { entity_id: ma, volume_level: Math.round(v * 100) / 100 });
+        if (apply) apply(v);
+        else if (ma) this._call("media_player.volume_set", { entity_id: ma, volume_level: Math.round(v * 100) / 100 });
       }, 150);
     };
-    vol.addEventListener("pointerdown", (ev) => { vol.setPointerCapture?.(ev.pointerId); this._dragVol = true; set(ev); });
-    vol.addEventListener("pointermove", (ev) => { if (this._dragVol) set(ev); });
-    const release = () => { this._dragVol = false; clearTimeout(this._volFree); this._volFree = setTimeout(() => { this._volLocal = null; }, 2000); };
+    vol.addEventListener("pointerdown", (ev) => { vol.setPointerCapture?.(ev.pointerId); vol._drag = true; set(ev); });
+    vol.addEventListener("pointermove", (ev) => { if (vol._drag) set(ev); });
+    const release = () => { vol._drag = false; clearTimeout(vol._free); vol._free = setTimeout(() => { vol._local = null; }, 2000); };
     vol.addEventListener("pointerup", release);
     vol.addEventListener("pointercancel", release);
   }
@@ -1128,10 +1135,121 @@ class OrigamiMusic extends OrigamiBase {
     return h;
   }
 
-  _groupNames() {
-    const names = this._names(), { lead, mem } = this._groups(), ma = this._ctx?.ma;
+  _groupPlayers() {
+    const { lead, mem } = this._groups(), ma = this._ctx?.ma;
     const leader = mem[ma] ?? ma;
-    return leader ? [leader, ...(lead[leader] ?? [])].map((x) => names[x] ?? x) : [];
+    return leader ? [leader, ...(lead[leader] ?? [])] : [];
+  }
+
+  _groupNames() {
+    const names = this._names();
+    return this._groupPlayers().map((x) => names[x] ?? x);
+  }
+
+  // The volume of a group moves every speaker by the same step, like the group volume of Music Assistant,
+  // which Home Assistant does not expose. A preset sets every speaker to the same level.
+  _groupVolume(v, same) {
+    const S = this._hass.states, players = this._groupPlayers();
+    const levels = players.map((p) => S[p]?.attributes?.volume_level ?? 0);
+    const step = v - levels.reduce((x, y) => x + y, 0) / (levels.length || 1);
+    players.forEach((p, i) => this._call("media_player.volume_set", { entity_id: p,
+      volume_level: Math.round(Math.max(0, Math.min(1, same ? v : levels[i] + step)) * 100) / 100 }));
+  }
+
+  _paintGroupVolume(card) {
+    const t = this._t(), S = this._hass.states, players = this._groupPlayers(), names = this._names();
+    const levels = players.map((p) => S[p]?.attributes?.volume_level ?? 0);
+    const vol = card.querySelector(".vrow .vol");
+    vol._label = players.length > 1 ? t.group : "";
+    if (!vol._drag && vol._local == null) this._paintVol(vol, levels.reduce((x, y) => x + y, 0) / (levels.length || 1));
+    const more = card.querySelector(".vmore");
+    this._setIcon(more, this._volOpen ? "mdi:chevron-up" : "mdi:chevron-down");
+    more.classList.toggle("open", !!this._volOpen);
+    more.title = t.volumes;
+    const panel = card.querySelector(".vpanel");
+    panel.hidden = !this._volOpen;
+    if (!this._volOpen) return;
+    if (!panel._presets) {
+      panel._presets = true;
+      const presets = this._config.presets ?? [0.15, 0.3, 0.5];
+      panel.querySelector(".presets").replaceChildren(...[t.quiet, t.medium, t.loud].map((label, i) => {
+        const b = this._el("div", "preset", label);
+        b.dataset.preset = String(presets[i]);
+        return b;
+      }));
+    }
+    const rows = panel.querySelector(".mvols");
+    if (rows._sig !== players.join(",")) {
+      rows._sig = players.join(",");
+      rows.replaceChildren(...players.map((p) => {
+        const row = this._el("div", "mvol");
+        row.dataset.p = p;
+        const vol = this._el("div", "vol");
+        vol.innerHTML = '<i class="vfill"></i><i class="vknob"></i><span class="vpct"></span>';
+        this._wireVolume(vol, (v) => this._call("media_player.volume_set", { entity_id: p, volume_level: Math.round(v * 100) / 100 }));
+        row.append(this._el("div", "mname", names[p] ?? p), vol);
+        return row;
+      }));
+    }
+    for (const row of rows.children) {
+      const vol = row.querySelector(".vol");
+      if (!vol._drag && vol._local == null) this._paintVol(vol, S[row.dataset.p]?.attributes?.volume_level ?? 0);
+    }
+  }
+
+  // --- Also play on (layout: group): a tap adds a speaker to the group of the chosen one, or takes it out --------
+
+  _groupState() {
+    const cfg = this._config, S = this._hass.states, names = this._names(), { lead, mem } = this._groups();
+    const leader = mem[this._ctx?.ma] ?? this._ctx?.ma;
+    const solo = new Set(cfg.solo ?? []), alone = (cast, p) => solo.has(p) || solo.has(cast);
+    const leaderAlone = Object.entries(cfg.players ?? {}).some(([cast, p]) => p === leader && alone(cast, p));
+    const members = lead[leader] ?? [];
+    const chips = Object.entries(cfg.players ?? {}).filter(([, p]) => p !== leader).map(([cast, p]) => {
+      const off = ["unavailable", "unknown"].includes(S[p]?.state ?? "unavailable");
+      const on = members.includes(p);
+      return { p, name: names[p] ?? p, on, off, solo: alone(cast, p), na: !on && (off || alone(cast, p) || leaderAlone) };
+    });
+    return { leader, leaderAlone, members, chips, free: chips.filter((c) => !c.on && !c.na).map((c) => c.p) };
+  }
+
+  _renderGroup() {
+    if (!this.shadowRoot || !this._ctx) return;
+    const t = this._t(), g = this._groupState();
+    const sig = "group|" + g.leader + "|" + JSON.stringify(g.chips);
+    if (sig === this._sig) return;
+    this._sig = sig;
+    const card = this._skel("group", '<div class="hd"><span class="ht"></span><span class="hv lien" data-g="split"></span></div>'
+      + '<div class="ggrid"></div><div class="toast"></div>', (ev) => this._groupClick(ev));
+    card.querySelector(".ht").textContent = t.alsoOn;
+    const split = card.querySelector('[data-g="split"]');
+    split.hidden = !g.members.length;
+    split.replaceChildren(this._icon("mdi:link-variant-off"), this._el("span", null, t.ungroup));
+    const chip = (cls, icon, text, data) => {
+      const c = this._el("div", "gchip " + cls);
+      Object.assign(c.dataset, data);
+      c.append(this._icon(icon), this._el("span", null, text));
+      return c;
+    };
+    card.querySelector(".ggrid").replaceChildren(
+      ...g.chips.map((c) => chip((c.on ? "on" : "") + (c.na ? " na" : ""), "mdi:speaker", c.name, { p: c.p })),
+      chip("all" + (g.free.length ? "" : " na"), "mdi:speaker-multiple", t.allSpeakers, { g: "all" }));
+  }
+
+  _groupClick(ev) {
+    const t = this._t(), g = this._groupState(), names = this._names();
+    const action = ev.target.closest("[data-g]")?.dataset.g, p = ev.target.closest(".gchip[data-p]")?.dataset.p;
+    if (!g.leader) return;
+    if (action === "split") { if (g.members.length) this._call("media_player.unjoin", { entity_id: g.members }); return; }
+    if (action === "all") { if (g.free.length) this._call("media_player.join", { entity_id: g.leader, group_members: g.free }); return; }
+    const c = g.chips.find((x) => x.p === p);
+    if (!c) return;
+    if (c.na) {
+      this._toast(c.off ? (names[p] ?? p) + " · " + t.offline : c.solo ? (names[p] ?? p) + t.solo : (names[g.leader] ?? g.leader) + t.sololead);
+      return;
+    }
+    if (c.on) this._call("media_player.unjoin", { entity_id: p });
+    else this._call("media_player.join", { entity_id: g.leader, group_members: [p] });
   }
 
   _renderApp() {
@@ -1548,13 +1666,18 @@ class OrigamiMusic extends OrigamiBase {
       + '<div class="c" data-c="next"></div><div class="c" data-c="repeat"></div></div>'
       + '<div class="devrow"><div class="dev" data-c="dev"><ha-icon icon="mdi:speaker"></ha-icon><span></span></div><span class="devn"></span>'
       + '<div class="more" data-c="more"></div></div>'
-      + '<div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div><div class="toast"></div>',
+      + '<div class="vrow"><div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div>'
+      + '<div class="vmore" data-c="vmore"></div></div><div class="vpanel" hidden><div class="presets"></div><div class="mvols"></div></div>'
+      + '<div class="toast"></div>',
       (ev) => {
         const h = ev.target.closest('[data-act="fav-toggle"]');
         if (h) { this._favToggle(h.dataset.id); return; }
+        const preset = ev.target.closest("[data-preset]");
+        if (preset) { this._groupVolume(Number(preset.dataset.preset), true); return; }
+        if (ev.target.closest('[data-c="vmore"]')) { this._volOpen = !this._volOpen; this._renderNowPlaying(); return; }
         this._playerClick(ev);
       });
-    if (!card._vol) { card._vol = true; this._wireVolume(card.querySelector(".vol")); }
+    if (!card._vol) { card._vol = true; this._wireVolume(card.querySelector(".vrow .vol"), (v) => this._groupVolume(v)); }
     const group = this._groupNames();
     card.querySelector(".name").textContent = !ma ? t.nosel : known ? (a.media_title || t.playing) : t.idle;
     card.querySelector(".status").textContent = known ? [a.media_artist, a.media_album_name].filter(Boolean)[0] ?? "" : "";
@@ -1577,7 +1700,7 @@ class OrigamiMusic extends OrigamiBase {
     card.classList.toggle("dead", !st || ["unavailable", "unknown"].includes(st.state));
     card.classList.toggle("idle", !live);
     this._setIcon(card.querySelector(".vic"), (a.volume_level ?? 0) < 0.34 ? "mdi:volume-low" : (a.volume_level ?? 0) < 0.67 ? "mdi:volume-medium" : "mdi:volume-high");
-    if (!this._dragVol && this._volLocal == null) this._paintVol(card, a.volume_level ?? 0);
+    this._paintGroupVolume(card);
     this._tick();
     if (st?.state === "playing") { if (!this._tickT) this._tickT = setInterval(() => this._tick(), 1000); }
     else { clearInterval(this._tickT); this._tickT = null; }
@@ -1940,6 +2063,39 @@ const ORIGAMI_MUSIC_CSS = `
   .devn { flex: none; font-size: 13px; font-weight: 600; color: var(--secondary-text-color); }
   .devrow .more { margin-left: auto; width: 44px; height: 44px; border-radius: 14px; }
   ha-card.nowp.dead .ctrls, ha-card.nowp.dead .vol { opacity: var(--opacity-disabled, 0.4); pointer-events: none; }
+  /* Group volume of the now playing pop-up, and the also play on grid (group) */
+  .vrow { display: flex; align-items: center; gap: 8px; }
+  .vrow .vol { flex: 1 1 auto; }
+  .vmore { flex: none; width: 48px; height: 48px; border-radius: 16px; background: var(--fill-subtle, #f1efeb); display: flex;
+    align-items: center; justify-content: center; cursor: pointer; color: var(--primary-text-color); --mdc-icon-size: 24px; }
+  .vmore.open { background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
+  .vpanel { display: flex; flex-direction: column; gap: 10px; }
+  .vpanel[hidden] { display: none; }
+  .presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+  .preset { height: 42px; border-radius: 14px; background: var(--fill-subtle, #eae8e4); display: flex; align-items: center;
+    justify-content: center; font-size: 14px; font-weight: 700; color: var(--primary-text-color); cursor: pointer; }
+  .preset:active, .gchip:active { transform: scale(0.97); }
+  .mvols { display: flex; flex-direction: column; gap: 8px; }
+  .mvol { display: flex; align-items: center; gap: 12px; }
+  .mname { width: 96px; flex: none; font-size: 14px; font-weight: 700; color: var(--primary-text-color);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mvol .vol { flex: 1 1 auto; height: 38px; border-radius: 13px; }
+  .mvol .vknob { top: 9px; bottom: 9px; }
+  .mvol .vpct { right: 12px; font-size: 13px; }
+  ha-card.group { background: none; box-shadow: none; border: 0; padding: 0; gap: 0; }
+  ha-card.group .hd { padding-top: 8px; }
+  ha-card.group .hv { display: flex; align-items: center; gap: 6px; font-size: 14px; --mdc-icon-size: 18px; }
+  ha-card.group .hv[hidden] { display: none; }
+  .ggrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .gchip { height: 48px; box-sizing: border-box; padding: 0 14px; border-radius: 16px; display: flex; align-items: center; gap: 10px;
+    background: var(--fill-subtle, #eae8e4); color: var(--secondary-text-color); font-size: 15px; font-weight: 700; cursor: pointer;
+    --mdc-icon-size: 20px; min-width: 0; }
+  .gchip span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .gchip.on { background: var(--ha-card-background, #fff); color: var(--primary-text-color);
+    box-shadow: var(--card-elevation-flat, 0 4px 12px rgba(74, 70, 64, 0.08)); }
+  .gchip.on ha-icon { color: var(--state-media_player-active-color, #6f93ab); }
+  .gchip.na { opacity: var(--opacity-disabled, 0.45); }
+  .gchip.all { background: none; border: 1.5px dashed color-mix(in srgb, var(--primary-text-color, #4a4640) 22%, transparent); }
 `;
 
 if (typeof customElements !== "undefined" && !customElements.get("origami-music")) {

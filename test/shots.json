@@ -3,5 +3,5 @@
   {"name": "popup", "fixture": "popup", "height": 1500},
   {"name": "library", "fixture": "library-popup", "height": 1200},
   {"name": "app", "fixture": "app-popup", "height": 2000},
-  {"name": "now-playing", "fixture": "nowplaying-popup", "height": 1500}
+  {"name": "now-playing", "fixture": "nowplaying-popup", "height": 1700}
 ]

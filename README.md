@@ -44,7 +44,8 @@ The banner shows the track that plays on a Music Assistant player, or offers to 
 | `queue` | The tracks after the current one. A tap plays one. |
 | `library` | Search, categories, and the playlists and albums played last. Each result plays now or right after the current track. |
 | `app` | The music pop-up with home, search and library tabs and a mini player. See Music pop-up. |
-| `nowplaying` | The full player: big cover, heart, controls, the speakers of the group and the volume |
+| `nowplaying` | The full player: big cover, heart, controls, the speakers of the group and the volume of the group, which unfolds into presets and a slider for each speaker |
+| `group` | Also play on: a tap adds a speaker to the group of the chosen speaker or takes it out, with All and Ungroup |
 | none | The tabbed card: queue, library and search in one card |
 
 </details>
@@ -131,11 +132,11 @@ The `app` layout puts the music in one pop-up, with the navigation of Spotify:
 | Search | Recent searches on this device, browse tiles, and results that play now or next |
 | Library | Filters, sort, liked songs pinned on top, and playlist, album and artist pages with Play all |
 
-A mini player stays at the bottom. A tap opens `player_path`, the heart likes the track and the button plays or pauses. The `nowplaying` layout is the full player for that pop-up, and its speakers chip opens `speakers_path`.
+A mini player stays at the bottom. A tap opens `player_path`, the heart likes the track and the button plays or pauses. The `nowplaying` layout is the full player for that pop-up, and its speakers chip opens `speakers_path`. In a group, its volume moves every speaker by the same step, as the group volume of Music Assistant does, and the arrow next to it shows Quiet, Medium and Loud presets and a slider for each speaker. The `group` layout goes below it.
 
 <img alt="The music pop-up and the now playing pop-up, in light and dark mode" src="https://raw.githubusercontent.com/BaQs/origami_music/main/images/app.png">
 
-<img alt="The now playing pop-up with the queue, in light and dark mode" src="https://raw.githubusercontent.com/BaQs/origami_music/main/images/now-playing.png">
+<img alt="The now playing pop-up with also play on and the queue, in light and dark mode" src="https://raw.githubusercontent.com/BaQs/origami_music/main/images/now-playing.png">
 
 ```yaml
 type: custom:origami-music
@@ -225,6 +226,7 @@ template:
 | `trends` | | `app`: chart sensors by zone, such as `{ France: sensor.charts_france }`. The keys name the chips. |
 | `player_path`, `speakers_path` | | `app`, `nowplaying`: opened by the mini player and by the speakers chip |
 | `ma_path` | | `app`: a link to Music Assistant at the end of the library |
+| `presets` | `[0.15, 0.3, 0.5]` | `nowplaying`: the volumes of the Quiet, Medium and Loud presets |
 | `config_entry_id` | | The Music Assistant entry, when there is more than one |
 
 </details>
