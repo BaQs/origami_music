@@ -359,4 +359,7 @@ test("a solo speaker is left out of also play on", async ({ page }) => {
   expect((await calls(page)).filter((c) => c.service === "join").map((c) => c.data.group_members)).toEqual([["media_player.bedroom"]]);
   await group.locator(".gchip", { hasText: "Bathroom" }).click();
   await expect(group.locator(".toast")).toHaveText("Bathroom can't join a group");
+  await expect(group.locator(".ghint")).toBeHidden();
+  await open(page, "fixture=group&solo=media_player.living_room");
+  await expect(card(page, "group").locator(".ghint")).toHaveText("Living room plays alone, so no group is possible");
 });

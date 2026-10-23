@@ -1220,8 +1220,12 @@ class OrigamiMusic extends OrigamiBase {
     if (sig === this._sig) return;
     this._sig = sig;
     const card = this._skel("group", '<div class="hd"><span class="ht"></span><span class="hv lien" data-g="split"></span></div>'
-      + '<div class="ggrid"></div><div class="toast"></div>', (ev) => this._groupClick(ev));
+      + '<div class="ghint"></div><div class="ggrid"></div><div class="toast"></div>', (ev) => this._groupClick(ev));
     card.querySelector(".ht").textContent = t.alsoOn;
+    // A speaker that plays alone cannot lead a group: say so, instead of a grid that only answers to a tap
+    const hint = card.querySelector(".ghint");
+    hint.hidden = !g.leaderAlone;
+    hint.textContent = g.leaderAlone ? (this._names()[g.leader] ?? g.leader) + t.sololead : "";
     const split = card.querySelector('[data-g="split"]');
     split.hidden = !g.members.length;
     split.replaceChildren(this._icon("mdi:link-variant-off"), this._el("span", null, t.ungroup));
@@ -2086,6 +2090,8 @@ const ORIGAMI_MUSIC_CSS = `
   ha-card.group .hd { padding-top: 8px; }
   ha-card.group .hv { display: flex; align-items: center; gap: 6px; font-size: 14px; --mdc-icon-size: 18px; }
   ha-card.group .hv[hidden] { display: none; }
+  .ghint { padding: 0 4px 10px; font-size: 13px; font-weight: 600; color: var(--secondary-text-color); }
+  .ghint[hidden] { display: none; }
   .ggrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
   .gchip { height: 48px; box-sizing: border-box; padding: 0 14px; border-radius: 16px; display: flex; align-items: center; gap: 10px;
     background: var(--fill-subtle, #eae8e4); color: var(--secondary-text-color); font-size: 15px; font-weight: 700; cursor: pointer;
