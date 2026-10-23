@@ -36,7 +36,7 @@ library.audiobook = [];
 // Two made-up charts as a chart sensor reports them: tracks in order, and the order of the previous chart
 const CHARTS = {
   france: [["Neon Avenue", "Kite Club", 5], ["Paper Boats", "Mira Vale", 2], ["Slow River", "The Lanterns", 1], ["Northern Line", "Odd Harbour", 3],
-    ["Blue Hours", "Juno Park", 6]],
+    ["Blue Hours", "Juno Park", 6], ["Field Notes", "The Lanterns", 4], ["Harbour Lights", "Odd Harbour", 6]],
   world: [["Static", "Odd Harbour", 3], ["Late Bloom", "Mira Vale", 2], ["Golden Hour", "The Lanterns", 1]],
 };
 const chart = (list, base) => ({ tracks: list.map(([title, artist, n], i) => ({ id: base + i, title, artist, image: cover(n) })) });

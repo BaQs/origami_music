@@ -139,7 +139,7 @@ const ORIGAMI_MUSIC_TEXT = {
     kind: { playlist: "Playlist", album: "Album", artist: "Artiste", track: "Titre", radio: "Radio", podcast: "Podcast", audiobook: "Livre audio" },
     home: "Accueil", searchTab: "Recherche", libTab: "Bibliothèque", played: "Écouté récemment", trends: "Tendances du moment",
     updated: "Mis à jour ", today: "aujourd'hui", yesterday: "hier", on: "le ",
-    top: "Top 20 ›", topLess: "Top 5 ‹", isNew: "nouveau", radios: "Radios", edit: "Modifier ›", favs: "Tes favoris", all: "Tout ›",
+    top: "Voir le top ", topLess: "Voir moins", isNew: "nouveau", radios: "Radios", edit: "Modifier ›", favs: "Tes favoris", all: "Tout ›",
     artists: "Tes artistes", liked: "Titres favoris", recentSearches: "Recherches récentes", clear: "Tout effacer", browse: "Parcourir",
     added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
     like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
@@ -164,7 +164,7 @@ const ORIGAMI_MUSIC_TEXT = {
     kind: { playlist: "Playlist", album: "Album", artist: "Artist", track: "Track", radio: "Radio", podcast: "Podcast", audiobook: "Audiobook" },
     home: "Home", searchTab: "Search", libTab: "Library", played: "Recently played", trends: "Trending now",
     updated: "Updated ", today: "today", yesterday: "yesterday", on: "on ",
-    top: "Top 20 ›", topLess: "Top 5 ‹", isNew: "new", radios: "Radio", edit: "Edit ›", favs: "Your favorites", all: "All ›",
+    top: "See the top ", topLess: "See less", isNew: "new", radios: "Radio", edit: "Edit ›", favs: "Your favorites", all: "All ›",
     artists: "Your artists", liked: "Liked songs", recentSearches: "Recent searches", clear: "Clear all", browse: "Browse",
     added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
     like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
@@ -1348,7 +1348,8 @@ class OrigamiMusic extends OrigamiBase {
     const any = zones.some((z) => (S[cfg.trends[z]]?.attributes?.tracks ?? []).length);
     const rows = trendRows(sensor?.attributes?.tracks, sensor?.attributes?.previous).slice(0, this._topOpen ? 20 : 5);
     const secT = pane.querySelector(".trends");
-    this._paint(secT, [any, zone, this._topOpen ? 1 : 0, sensor?.state, rows.map((r) => r.id + r.move).join(",")].join("|"), () => {
+    const total = Math.min((sensor?.attributes?.tracks ?? []).length, 20);
+    this._paint(secT, [any, zone, this._topOpen ? 1 : 0, sensor?.state, total, rows.map((r) => r.id + r.move).join(",")].join("|"), () => {
       if (!any) { secT.replaceChildren(); return; }
       const chips = this._el("div", "zones");
       for (const z of zones) {
@@ -1376,7 +1377,14 @@ class OrigamiMusic extends OrigamiBase {
         row.append(rank, this._thumb(r.image, "mdi:music-note"), text, next);
         return row;
       }));
-      secT.replaceChildren(this._head(t.trends, this._topOpen ? t.topLess : t.top, { act: "top" }), chips, box);
+      // The switch between the top 5 and the whole chart is a button under the list, easier to see than a link
+      if (total > 5) {
+        const more = this._el("div", "tmore");
+        more.dataset.act = "top";
+        more.append(this._el("span", null, this._topOpen ? t.topLess : t.top + total), this._icon(this._topOpen ? "mdi:chevron-up" : "mdi:chevron-down"));
+        box.append(more);
+      }
+      secT.replaceChildren(this._head(t.trends), chips, box);
     });
 
     const secRa = pane.querySelector(".radios");
@@ -1988,6 +1996,10 @@ const ORIGAMI_MUSIC_CSS = `
   .move-new { color: var(--state-media_player-active-color, #6f93ab); }
   .trow .thumb { width: 48px; height: 48px; border-radius: 12px; }
   .trow .title { font-size: 15px; } .trow .sub { font-size: 12px; font-weight: 600; }
+  .tmore { height: 52px; display: flex; align-items: center; justify-content: center; gap: 6px; cursor: pointer;
+    border-top: 1px solid color-mix(in srgb, var(--primary-text-color, #4a4640) 8%, transparent);
+    font-size: 15px; font-weight: 700; color: var(--primary-text-color); --mdc-icon-size: 20px; }
+  .tmore:active { opacity: 0.6; }
   .nextb { width: 40px; height: 40px; flex: none; border-radius: 13px; background: var(--fill-subtle, #f4f3f0); display: flex;
     align-items: center; justify-content: center; color: var(--primary-text-color); --mdc-icon-size: 20px; cursor: pointer; }
   .rad, .arts { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }

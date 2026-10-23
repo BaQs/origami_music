@@ -220,6 +220,12 @@ test("trending tracks show how they moved, and a tap plays the best match from M
   await expect(rows.nth(2)).toContainText("=");
   await expect(rows.nth(4)).toContainText("new");
   await expect(app.locator(".maj")).toHaveText("Updated today");
+  await expect(app.locator(".tmore")).toHaveText("See the top 7");
+  await app.locator(".tmore").click();
+  await expect(rows).toHaveCount(7);
+  await expect(app.locator(".tmore")).toHaveText("See less");
+  await app.locator(".tmore").click();
+  await expect(rows).toHaveCount(5);
   await rows.nth(0).click();
   await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
     data: expect.objectContaining({ media_content_id: "spotify://track/neon", enqueue: "play" }) }));
@@ -227,6 +233,7 @@ test("trending tracks show how they moved, and a tap plays the best match from M
     service_data: expect.objectContaining({ name: "Kite Club Neon Avenue" }) }));
   await app.locator('.zone[data-zone="World"]').click();
   await expect(rows).toHaveCount(3);
+  await expect(app.locator(".tmore")).toHaveCount(0);
   await expect(rows.nth(0)).toContainText("Static");
   // A "(feat. ...)" on one side only still finds the track, over a first result with another title
   await rows.nth(1).locator(".nextb").click();
