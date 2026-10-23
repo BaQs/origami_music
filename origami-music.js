@@ -2,13 +2,15 @@
  * Origami Music: Music Assistant cards for Home Assistant in the Origami style. See the README for the options.
  *
  * type: custom:origami-music
- * layout: player                              # banner, shelf, player, speakers, queue, library, or none for the tabbed card
+ * layout: app                                 # banner, shelf, player, speakers, queue, library, app, nowplaying, or none for the tabbed card
  * select: input_select.speaker                # follows the speaker chosen in an input_select
  * players:                                    # chosen speaker -> Music Assistant player
  *   media_player.living_room_cast: media_player.living_room
  * entity: media_player.living_room            # without select, the Music Assistant player to follow
+ * trends: { France: sensor.charts_france }     # app: chart sensors by zone, see the README
+ * player_path / speakers_path / ma_path        # app, nowplaying: the player and speakers pop-ups, the Music Assistant page
  */
-const ORIGAMI_MUSIC_VERSION = "0.7.0";
+const ORIGAMI_MUSIC_VERSION = "0.8.0";
 
 function resolvePlayer(config, states) {
   const sel = config.select ? states?.[config.select]?.state : null;
@@ -45,6 +47,50 @@ function interleave(lists) {
   const out = [];
   for (let i = 0; lists.some((l) => i < l.length); i++) for (const l of lists) if (i < l.length) out.push(l[i]);
   return out;
+}
+
+// Trending: rank and move against the previous chart (a list of track ids)
+function trendRows(tracks, previous) {
+  const prev = Array.isArray(previous) ? previous : [];
+  return (Array.isArray(tracks) ? tracks : []).map((t, i) => {
+    const j = prev.indexOf(t?.id);
+    const move = !prev.length ? "" : j < 0 ? "new" : j > i ? "up" : j < i ? "down" : "same";
+    return { ...t, rank: i + 1, move, gap: j < 0 ? 0 : Math.abs(j - i) };
+  });
+}
+
+// Comparison of titles and artists without accents and case; loose also drops "(feat. ...)" and "[...]"
+function normName(s, loose) {
+  const n = String(s ?? "").toLowerCase().normalize("NFKD").replace(/[\u0300-\u036f]/g, "");
+  return (loose ? n.replace(/\(.*?\)|\[.*?\]/g, " ") : n).replace(/[^a-z0-9]+/g, " ").trim();
+}
+
+// Best search result for a title and its artist. The exact title comes first, so a remix does not win over the
+// original; the loose title only after that, for a "(feat. ...)" on one side only. Else the first result.
+function pickTrack(tracks, title, artist) {
+  const A = normName(artist);
+  const list = Array.isArray(tracks) ? tracks : [];
+  const byArtist = (it) => (it?.artists ?? []).some((a) => { const n = normName(a?.name); return !!n && !!A && (A.includes(n) || n.includes(A)); });
+  for (const loose of [false, true]) {
+    const same = (it) => normName(it?.name, loose) === normName(title, loose);
+    const hit = list.find((it) => same(it) && byArtist(it)) ?? list.find(same);
+    if (hit) return hit;
+  }
+  return list[0] ?? null;
+}
+
+// Date of a chart: today, yesterday, or day/month
+function dayLabel(iso, now, t) {
+  const d = new Date(iso);
+  if (!iso || isNaN(d)) return "";
+  const midnight = (x) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const n = Math.round((midnight(now) - midnight(d)) / 86400000);
+  return n <= 0 ? t.today : n === 1 ? t.yesterday : t.on + String(d.getDate()).padStart(2, "0") + "/" + String(d.getMonth() + 1).padStart(2, "0");
+}
+
+// Short name for a radio tile: "Radio Nova" -> "Nova", "France Inter" -> "Inter"
+function radioShort(name) {
+  return String(name ?? "").trim().replace(/^(radio|france)\s+/i, "").split(/\s+/)[0] || String(name ?? "");
 }
 
 // The Music Assistant categories of the library root, without the other media sources of Home Assistant
@@ -91,6 +137,13 @@ const ORIGAMI_MUSIC_TEXT = {
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
     nogroup: "sans groupe", solo: " ne peut pas rejoindre de groupe", sololead: " joue seule : pas de groupe possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artiste", track: "Titre", radio: "Radio", podcast: "Podcast", audiobook: "Livre audio" },
+    home: "Accueil", searchTab: "Recherche", libTab: "Bibliothèque", played: "Écouté récemment", trends: "Tendances du moment",
+    updated: "Mis à jour ", today: "aujourd'hui", yesterday: "hier", on: "le ",
+    top: "Top 20 ›", topLess: "Top 5 ‹", isNew: "nouveau", radios: "Radios", edit: "Modifier ›", favs: "Tes favoris", all: "Tout ›",
+    artists: "Tes artistes", liked: "Titres favoris", recentSearches: "Recherches récentes", clear: "Tout effacer", browse: "Parcourir",
+    added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
+    like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
+    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…",
   },
   en: {
     none: "No queue", empty: "Queue empty", load: "Loading…", one: " item up next", many: " items up next",
@@ -107,8 +160,27 @@ const ORIGAMI_MUSIC_TEXT = {
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
     nogroup: "no groups", solo: " can't join a group", sololead: " plays alone, so no group is possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artist", track: "Track", radio: "Radio", podcast: "Podcast", audiobook: "Audiobook" },
+    home: "Home", searchTab: "Search", libTab: "Library", played: "Recently played", trends: "Trending now",
+    updated: "Updated ", today: "today", yesterday: "yesterday", on: "on ",
+    top: "Top 20 ›", topLess: "Top 5 ‹", isNew: "new", radios: "Radio", edit: "Edit ›", favs: "Your favorites", all: "All ›",
+    artists: "Your artists", liked: "Liked songs", recentSearches: "Recent searches", clear: "Clear all", browse: "Browse",
+    added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
+    like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
+    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…",
   },
 };
+
+// Browse tiles of the search tab: library category, icon, tint
+const ORIGAMI_MUSIC_BROWSE = [
+  { k: "playlist", cat: "playlists", icon: "mdi:playlist-music", ink: "#3f5f74" },
+  { k: "album", cat: "albums", icon: "mdi:album", ink: "#7a5c3c" },
+  { k: "artist", cat: "artists", icon: "mdi:account-music-outline", ink: "#55703f" },
+  { k: "radio", cat: "radio", icon: "mdi:radio", ink: "#a35a3f" },
+  { k: "favs", icon: "mdi:heart", ink: "#9b4f63" },
+  { k: "added", icon: "mdi:new-box", ink: "#5f5277" },
+];
+const ORIGAMI_MUSIC_RADIO_COLORS = ["#6f93ab", "#c9785c", "#8c7aa0", "#7f9a6d", "#b89a5e", "#9b6f7e"];
+const ORIGAMI_MUSIC_LIVE = ["playing", "paused", "buffering"];
 
 const ORIGAMI_MUSIC_ICONS = {
   artists: "mdi:account-music-outline", albums: "mdi:album", tracks: "mdi:music-note", playlists: "mdi:playlist-music",
@@ -132,7 +204,7 @@ class OrigamiMusic extends OrigamiBase {
     if (!this.shadowRoot) this.attachShadow({ mode: "open" });
   }
 
-  getCardSize() { return ["banner", "shelf"].includes(this._config?.layout) ? 3 : 6; }
+  getCardSize() { return ["banner", "shelf"].includes(this._config?.layout) ? 3 : this._config?.layout === "app" ? 12 : 6; }
   getGridOptions() { return { columns: 12, rows: "auto", min_rows: 3 }; }
 
   set hass(hass) {
@@ -168,6 +240,8 @@ class OrigamiMusic extends OrigamiBase {
         .finally(() => { m.pending = false; this._sig = null; this._safe(() => (cfg.layout === "queue" ? this._renderQueue() : this._render())); });
     }
     this._ctx = { chosen, ma, st, qid, cur };
+    if (cfg.layout === "app") { this._renderApp(); return; }
+    if (cfg.layout === "nowplaying") { this._renderNowPlaying(); return; }
     if (cfg.layout === "banner") { this._fetchRecent(); this._renderBanner(); return; }
     if (cfg.layout === "shelf") { this._fetchRecent(); this._renderShelf(); return; }
     if (cfg.layout === "player") { this._renderPlayer(); return; }
@@ -270,6 +344,7 @@ class OrigamiMusic extends OrigamiBase {
 
   _render() {
     if (this._config?.layout === "library") { this._renderLibrary(); return; }
+    if (this._config?.layout === "app") { this._renderApp(); return; }
     const root = this.shadowRoot, t = this._t();
     if (!root || !this._ctx) return;
     const { chosen, ma, st, qid, cur } = this._ctx;
@@ -377,7 +452,9 @@ class OrigamiMusic extends OrigamiBase {
     const level = this._stack[this._stack.length - 1];
     const out = [];
     if (!level) return out;
-    if (this._stack.length > 1) {
+    const app = this._config?.layout === "app";
+    // In the app layout every page opens over the tab, and the arrow goes back to it
+    if (this._stack.length > 1 || app) {
       const back = this._el("div", "back");
       back.dataset.act = "back";
       back.append(this._icon("mdi:chevron-left"), this._el("span", null, level.title || t.back));
@@ -386,7 +463,13 @@ class OrigamiMusic extends OrigamiBase {
     if (level.children == null) { out.push(this._el("div", "hint", t.load)); return out; }
     if (level.err) { out.push(this._el("div", "hint error", t.err + level.err)); return out; }
     if (!level.children.length) { out.push(this._el("div", "hint", t.nothing)); return out; }
-    if (this._stack.length === 1) {
+    if (app && level.id && ["playlist", "album", "artist"].includes(level.type)) {
+      const all = this._el("div", "playall");
+      Object.assign(all.dataset, { act: "play-now", id: level.id, type: level.type });
+      all.append(this._icon("mdi:play"), this._el("span", null, t.playAll));
+      out.push(all);
+    }
+    if (!level.id) {
       const grid = this._el("div", "grid");
       for (const c of level.children) {
         const tile = this._el("div", "tile");
@@ -410,7 +493,10 @@ class OrigamiMusic extends OrigamiBase {
     else if (c.can_play) Object.assign(row.dataset, { act: "play", id, type });
     const text = this._el("div", "text");
     text.append(this._el("div", "title", c.title ?? ""));
+    if (c.sub) text.append(this._el("div", "sub", c.sub));
     row.append(this._thumb(c.thumbnail, ORIGAMI_MUSIC_ICONS[c.media_class] ?? "mdi:music-note"), text);
+    // A heart on radio results adds them to the radio row of the app layout (Music Assistant favorites)
+    if (this._config?.layout === "app" && c.media_class === "radio") row.append(this._heart(id));
     if (c.can_play) {
       const acts = this._el("div", "acts");
       for (const [act, icon, label] of [["next", "mdi:skip-next", t.next], ["play", "mdi:play", t.play]]) {
@@ -444,6 +530,7 @@ class OrigamiMusic extends OrigamiBase {
 
   _renderSearchResults() {
     if (this._config?.layout === "library") { this._sigLib = null; this._renderLibrary(); return; }
+    if (this._config?.layout === "app") { this._renderApp(); return; }
     const body = this.shadowRoot?.querySelector(".body");
     const res = body?.querySelector(".results");
     if (!res) return;
@@ -657,7 +744,7 @@ class OrigamiMusic extends OrigamiBase {
   }
 
   _tick() {
-    const card = this.shadowRoot?.querySelector("ha-card.player");
+    const card = this.shadowRoot?.querySelector("ha-card.player, ha-card.nowp");
     if (!card || !this._ctx) return;
     const st = this._ctx.st, a = st?.attributes ?? {}, dur = Number(a.media_duration) || 0;
     let pos = Number(a.media_position) || 0;
@@ -703,6 +790,8 @@ class OrigamiMusic extends OrigamiBase {
     const ma = this._ctx?.ma, a = this._ctx?.st?.attributes ?? {};
     if (!c || !ma) return;
     if (c === "more") this.dispatchEvent(new CustomEvent("hass-more-info", { bubbles: true, composed: true, detail: { entityId: ma } }));
+    else if (c === "fav") this._favToggle(a.media_content_id);
+    else if (c === "dev") this._go(this._config.speakers_path);
     else if (c === "pp") this._call("media_player.media_play_pause", { entity_id: ma });
     else if (c === "prev") this._call("media_player.media_previous_track", { entity_id: ma });
     else if (c === "next") this._call("media_player.media_next_track", { entity_id: ma });
@@ -943,6 +1032,557 @@ class OrigamiMusic extends OrigamiBase {
     body.replaceChildren(hd(t.cat.playlists, t.recentf, "playlists"), playlists, hd(t.cat.albums, t.recentm, "albums"), albums);
   }
 
+  // --- Music pop-up with Spotify-like navigation (layout: app) ----------------------------------------------
+
+  _entryId() {
+    if (this._config.config_entry_id) return Promise.resolve(this._config.config_entry_id);
+    return (window.__origamiMusicEntry ??= this._hass.callWS({ type: "config_entries/get", domain: "music_assistant" })
+      .then((r) => r?.[0]?.entry_id)
+      .catch((e) => { window.__origamiMusicEntry = null; throw e; }));
+  }
+
+  // Lists from the Music Assistant library, shared by the cards of the page and read again every 10 minutes
+  _libList(key, data) {
+    const C = (window.__origamiMusicLists ??= {});
+    const e = (C[key] ??= { items: null, at: 0, pending: false, err: null, cards: new Set() });
+    e.cards.add(this);
+    if (!e.pending && Date.now() - e.at > 10 * 60 * 1000) {
+      e.pending = true; e.at = Date.now();
+      this._entryId()
+        .then((entry) => this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "get_library", return_response: true,
+          service_data: { config_entry_id: entry, ...data } }))
+        .then((x) => { e.items = x?.response?.items ?? []; e.err = null; })
+        .catch((err) => { e.err = err?.message ?? String(err); e.items = e.items ?? []; })
+        .finally(() => {
+          e.pending = false;
+          for (const c of e.cards) {
+            if (!c.isConnected) { e.cards.delete(c); continue; }
+            c._gen = (c._gen ?? 0) + 1;
+            c._safe(() => c._update());
+          }
+        });
+    }
+    return e;
+  }
+
+  _expire(...keys) {
+    const C = window.__origamiMusicLists ?? {};
+    for (const k of keys) if (C[k]) C[k].at = 0;
+  }
+
+  // Favorite state of a Music Assistant item, shared by the cards and read again after 5 minutes
+  _fav(uri) {
+    if (!uri) return "na";
+    const F = (window.__origamiMusicFav ??= new Map());
+    let e = F.get(uri);
+    if (!e || (!e.pending && Date.now() - e.at > 5 * 60 * 1000)) {
+      e = { v: e?.v ?? null, pending: true, at: Date.now() };
+      F.set(uri, e);
+      this._hass.callWS({ type: "bubble_card_tools/ma_favorite_state", uri })
+        .then((r) => { e.v = r?.supported === false ? "na" : !!r?.favorite; })
+        .catch(() => { e.v = "na"; })
+        .finally(() => { e.pending = false; this._favRefresh(); });
+    }
+    return e.v;   // null while unknown, "na" when the item cannot be a favorite (a stream, an AirPlay input)
+  }
+
+  _favToggle(uri) {
+    const e = window.__origamiMusicFav?.get(uri), t = this._t();
+    if (!e || typeof e.v !== "boolean") { this._toast(t.wait); return; }
+    const v = !e.v;
+    e.v = v; e.at = Date.now();
+    this._favRefresh();
+    this._hass.callWS({ type: "bubble_card_tools/ma_favorite_set", uri, favorite: v })
+      .then(() => { this._toast(v ? t.like : t.unlike); this._expire("favs", "radios", "lib|radio|recent", "lib|radio|az", "lib|radio|added"); this._favRefresh(); })
+      .catch((err) => { e.v = !v; this._favRefresh(); this._toast(t.err + (err?.message ?? err)); });
+  }
+
+  _favRefresh() {
+    this._gen = (this._gen ?? 0) + 1;
+    this._sig = null;
+    this._safe(() => this._update());
+  }
+
+  _heart(uri, extra) {
+    const v = this._fav(uri);
+    const h = this._el("div", "heart" + (v === true ? " on" : "") + (extra ? " " + extra : ""));
+    Object.assign(h.dataset, { act: "fav-toggle", id: uri });
+    h.hidden = v === "na";
+    h.title = this._t().favs;
+    h.append(this._icon(v === true ? "mdi:heart" : "mdi:heart-outline"));
+    return h;
+  }
+
+  // Draws a block only when its signature changes, as the card gets every state change of Home Assistant
+  _paint(el, sig, fn) {
+    sig = (this._gen ?? 0) + "|" + sig;
+    if (el._sig === sig) return;
+    el._sig = sig;
+    fn();
+  }
+
+  _head(title, link, data) {
+    const h = this._el("div", "hd");
+    h.append(this._el("span", "ht", title));
+    if (link) { const l = this._el("span", "hv lien", link); Object.assign(l.dataset, data ?? {}); h.append(l); }
+    return h;
+  }
+
+  _groupNames() {
+    const names = this._names(), { lead, mem } = this._groups(), ma = this._ctx?.ma;
+    const leader = mem[ma] ?? ma;
+    return leader ? [leader, ...(lead[leader] ?? [])].map((x) => names[x] ?? x) : [];
+  }
+
+  _renderApp() {
+    if (!this.shadowRoot || !this._ctx) return;
+    const t = this._t();
+    if (!["home", "search", "lib"].includes(this._tab)) this._tab = "home";
+    const card = this._skel("app", '<div class="tabs2"></div><div class="pane"></div><div class="mini" hidden></div><div class="toast"></div>',
+      (ev) => this._appClick(ev));
+    if (!card._wired) {
+      card._wired = true;
+      card.querySelector(".tabs2").innerHTML = [["home", t.home], ["search", t.searchTab], ["lib", t.libTab]]
+        .map(([k, l]) => `<div class="tab2" data-tab="${k}">${omEsc(l)}</div>`).join("");
+    }
+    for (const c of card.querySelectorAll(".tab2")) c.classList.toggle("on", c.dataset.tab === this._tab);
+    this._renderMini(card.querySelector(".mini"));
+    const pane = card.querySelector(".pane");
+    if (this._stack.length) {
+      const level = this._stack[this._stack.length - 1];
+      if (pane.dataset.kind !== "browse") { pane.dataset.kind = "browse"; pane._sig = null; }
+      this._paint(pane, ["browse", this._stack.length, level.id, level.children?.length ?? -1, level.err ?? ""].join("|"),
+        () => pane.replaceChildren(...this._browseView()));
+      return;
+    }
+    if (this._tab === "home") this._paneHome(pane);
+    else if (this._tab === "search") this._paneSearch(pane);
+    else this._paneLib(pane);
+  }
+
+  _switchTab(k) {
+    this._tab = k;
+    this._stack = [];
+    const pane = this.shadowRoot?.querySelector("ha-card.app .pane");
+    if (pane) pane.dataset.kind = "";
+    this._renderApp();
+    // From a link low on the home tab, scroll back up to the tabs, and no further
+    this.shadowRoot?.querySelector("ha-card.app .tabs2")?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }
+
+  // Home: resume, recently played, trending, radio, favorites, artists
+  _paneHome(pane) {
+    const t = this._t(), cfg = this._config, { ma, chosen, st } = this._ctx, a = st?.attributes ?? {};
+    if (pane.dataset.kind !== "home") {
+      pane.dataset.kind = "home";
+      pane.innerHTML = ["resume", "played", "trends", "radios", "favs", "artists"].map((k) => `<div class="sec ${k}"></div>`).join("");
+    }
+    const pl = this._libList("recent-pl", { media_type: "playlist", order_by: "last_played_desc", limit: 6 });
+    const al = this._libList("recent-al", { media_type: "album", order_by: "last_played_desc", limit: 6 });
+    const radios = this._libList("radios", { media_type: "radio", favorite: true, order_by: "sort_name", limit: 12 });
+    const favs = this._libList("favs", { media_type: "track", favorite: true, order_by: "timestamp_added_desc", limit: 12 });
+    const arts = this._libList("artists", { media_type: "artist", order_by: "play_count_desc", limit: 10 });
+    const mix = pl.items && al.items ? interleave([pl.items, al.items]).slice(0, 6) : null;
+    const live = ORIGAMI_MUSIC_LIVE.includes(st?.state);
+
+    // Resume: when the chosen speaker is stopped, its last track (the queue is still there), else the last playlist or album
+    const room = this._speakerName(chosen, ma);
+    const resume = !ma || live ? null : a.media_title
+      ? { act: "resume", name: a.media_title, sub: [a.media_artist, room].filter(Boolean).join(" · "), pic: typeof a.entity_picture === "string" ? a.entity_picture : null }
+      : mix?.[0] ? { act: "play-now", id: mix[0].uri, name: mix[0].name, sub: [t.kind[mix[0].media_type], room].filter(Boolean).join(" · "), pic: safeImage(mix[0].image) } : null;
+    const secR = pane.querySelector(".resume");
+    this._paint(secR, JSON.stringify(resume), () => {
+      if (!resume) { secR.replaceChildren(); return; }
+      const c = this._el("div", "rcard");
+      Object.assign(c.dataset, { act: resume.act, id: resume.id ?? "", type: "music" });
+      const art = this._el("div", "art rart");
+      this._art(art, resume.pic, "mdi:playlist-music");
+      const text = this._el("div", "titles");
+      text.append(this._el("div", "rlab", t.resume), this._el("div", "name", resume.name), this._el("div", "status", resume.sub));
+      const pp = this._el("div", "pp big");
+      pp.append(this._icon("mdi:play"));
+      c.append(art, text, pp);
+      secR.replaceChildren(c);
+    });
+
+    const secP = pane.querySelector(".played");
+    this._paint(secP, mix ? mix.map((x) => x.uri).join(",") : "…", () => {
+      if (!mix?.length) { secP.replaceChildren(); return; }
+      const grid = this._el("div", "rgrid");
+      grid.append(...mix.map((it) => {
+        const c = this._el("div", "rtile");
+        Object.assign(c.dataset, { act: "play-now", id: it.uri, type: "music" });
+        c.title = t.play + " : " + (it.name ?? "");
+        c.append(this._thumb(it.image, ORIGAMI_MUSIC_ICONS[it.media_type] ?? "mdi:music"), this._el("span", null, it.name ?? ""));
+        return c;
+      }));
+      secP.replaceChildren(this._head(t.played), grid);
+    });
+
+    // Trending: one chart sensor per zone; a tap looks the track up in Music Assistant and plays it
+    const zones = Object.keys(cfg.trends ?? {});
+    const zone = zones.includes(this._zone) ? this._zone : zones[0];
+    const S = this._hass.states, sensor = S[cfg.trends?.[zone]];
+    const any = zones.some((z) => (S[cfg.trends[z]]?.attributes?.tracks ?? []).length);
+    const rows = trendRows(sensor?.attributes?.tracks, sensor?.attributes?.previous).slice(0, this._topOpen ? 20 : 5);
+    const secT = pane.querySelector(".trends");
+    this._paint(secT, [any, zone, this._topOpen ? 1 : 0, sensor?.state, rows.map((r) => r.id + r.move).join(",")].join("|"), () => {
+      if (!any) { secT.replaceChildren(); return; }
+      const chips = this._el("div", "zones");
+      for (const z of zones) {
+        const chip = this._el("div", "zone" + (z === zone ? " on" : ""), z);
+        Object.assign(chip.dataset, { act: "zone", zone: z });
+        chips.append(chip);
+      }
+      const day = dayLabel(sensor?.state, new Date(), t);
+      chips.append(this._el("span", "maj", day ? t.updated + day : ""));
+      const box = this._el("div", "tlist");
+      if (!rows.length) box.append(this._el("div", "hint", t.nothing));
+      box.append(...rows.map((r, i) => {
+        const row = this._el("div", "trow");
+        Object.assign(row.dataset, { act: "trend-play", i: String(i) });
+        row.title = t.play + " : " + r.title;
+        const rank = this._el("div", "rank");
+        const move = r.move === "up" ? "▲ " + r.gap : r.move === "down" ? "▼ " + r.gap : r.move === "new" ? t.isNew : r.move === "same" ? "=" : "";
+        rank.append(this._el("b", null, String(r.rank)), this._el("i", "move-" + (r.move || "none"), move));
+        const text = this._el("div", "text");
+        text.append(this._el("div", "title", r.title ?? ""), this._el("div", "sub", r.artist ?? ""));
+        const next = this._el("div", "nextb");
+        Object.assign(next.dataset, { act: "trend-next", i: String(i) });
+        next.title = t.next;
+        next.append(this._icon("mdi:playlist-play"));
+        row.append(rank, this._thumb(r.image, "mdi:music-note"), text, next);
+        return row;
+      }));
+      secT.replaceChildren(this._head(t.trends, this._topOpen ? t.topLess : t.top, { act: "top" }), chips, box);
+    });
+
+    const secRa = pane.querySelector(".radios");
+    this._paint(secRa, (radios.items ?? []).map((x) => x.uri + x.name).join(","), () => {
+      if (!radios.items?.length) { secRa.replaceChildren(); return; }
+      const box = this._el("div", "rad");
+      box.append(...radios.items.map((it, i) => {
+        const c = this._el("div", "radio");
+        Object.assign(c.dataset, { act: "play-now", id: it.uri, type: "music" });
+        c.title = t.play + " : " + (it.name ?? "");
+        const short = radioShort(it.name);
+        const sq = this._el("div", "sq" + (short.length > 5 ? " long" : ""), short);
+        sq.style.backgroundColor = ORIGAMI_MUSIC_RADIO_COLORS[i % ORIGAMI_MUSIC_RADIO_COLORS.length];
+        c.append(sq, this._el("div", "lab", it.name ?? ""));
+        return c;
+      }));
+      secRa.replaceChildren(this._head(t.radios, t.edit, { act: "goto", k: "radio" }), box);
+    });
+
+    const secF = pane.querySelector(".favs");
+    this._paint(secF, (favs.items ?? []).map((x) => x.uri).join(","), () => {
+      if (!favs.items?.length) { secF.replaceChildren(); return; }
+      const shelf = this._el("div", "shelf big");
+      shelf.append(...favs.items.map((it, i) => {
+        const c = this._el("div", "cover");
+        Object.assign(c.dataset, { act: "fav-play", i: String(i) });
+        c.title = t.play + " : " + (it.name ?? "");
+        c.append(this._thumb(it.image ?? it.album?.image, "mdi:music-note"), this._el("div", "cname", it.name ?? ""),
+          this._el("div", "ckind", (it.artists ?? []).map((x) => x?.name).filter(Boolean).join(", ")));
+        return c;
+      }));
+      const head = this._head(t.favs, t.all, { act: "goto", k: "favs" });
+      head.querySelector(".ht").append(this._icon("mdi:heart"));
+      secF.replaceChildren(head, shelf);
+    });
+
+    const secA = pane.querySelector(".artists");
+    this._paint(secA, (arts.items ?? []).map((x) => x.uri).join(","), () => {
+      if (!arts.items?.length) { secA.replaceChildren(); return; }
+      const box = this._el("div", "arts");
+      box.append(...arts.items.map((it) => {
+        const c = this._el("div", "art2");
+        Object.assign(c.dataset, { act: "open", id: it.uri, type: "artist", title: it.name ?? "" });
+        c.append(this._thumb(it.image, "mdi:account-music-outline"), this._el("span", null, it.name ?? ""));
+        return c;
+      }));
+      secA.replaceChildren(this._head(t.artists), box);
+    });
+  }
+
+  // Search: the field, recent searches (kept on this device), browse tiles, results
+  _paneSearch(pane) {
+    const t = this._t(), s = this._search;
+    if (pane.dataset.kind !== "search") {
+      pane.dataset.kind = "search";
+      pane.innerHTML = '<label class="search big"><ha-icon icon="mdi:magnify"></ha-icon><input type="search"></label><div class="sres"></div>';
+      const input = pane.querySelector("input");
+      input.placeholder = t.placeholder;
+      input.value = s.q;
+      input.addEventListener("input", () => this._safe(() => this._runSearch(input.value)));
+    }
+    const res = pane.querySelector(".sres");
+    if (s.q.trim().length < 2) {
+      const recent = this._searches();
+      this._paint(res, "idle|" + JSON.stringify(recent), () => {
+        res.classList.remove("busy");
+        const out = [];
+        if (recent.length) {
+          out.push(this._head(t.recentSearches, t.clear, { act: "searches-clear" }));
+          const box = this._el("div", "list");
+          box.append(...recent.map((r, i) => {
+            const row = this._el("div", "row item lrow");
+            Object.assign(row.dataset, r.expand ? { act: "open", id: r.id, type: r.type, title: r.title } : { act: "play", id: r.id, type: r.type });
+            const thumb = this._thumb(r.thumb, ORIGAMI_MUSIC_ICONS[r.cls] ?? "mdi:music-note");
+            if (r.cls === "artist") thumb.classList.add("round");
+            const text = this._el("div", "text");
+            text.append(this._el("div", "title", r.title), this._el("div", "sub", t.kind[r.cls] ?? ""));
+            const x = this._el("div", "x");
+            Object.assign(x.dataset, { act: "search-del", i: String(i) });
+            x.title = t.forget + r.title;
+            x.append(this._icon("mdi:close"));
+            row.append(thumb, text, x);
+            return row;
+          }));
+          out.push(box);
+        }
+        const grid = this._el("div", "cats2");
+        grid.append(...ORIGAMI_MUSIC_BROWSE.map((b) => {
+          const c = this._el("div", "cat2", b.cat ? t.cat[b.cat] : b.k === "favs" ? t.liked : t.added);
+          Object.assign(c.dataset, { act: "goto", k: b.k });
+          c.style.color = b.ink;
+          c.style.backgroundColor = `color-mix(in srgb, ${b.ink} 16%, var(--ha-card-background, #fff))`;
+          c.append(this._icon(b.icon));
+          return c;
+        }));
+        out.push(this._head(t.browse), grid);
+        res.replaceChildren(...out);
+      });
+      return;
+    }
+    this._paint(res, ["res", s.q, s.loading ? 1 : 0, s.results?.length ?? -1, s.err ?? ""].join("|"), () => {
+      // While a search loads, the rows in place stay (dimmed), so the pop-up keeps its height
+      res.classList.toggle("busy", s.loading && res.childElementCount > 0);
+      if (s.loading) { if (!res.childElementCount) res.replaceChildren(this._el("div", "hint", t.load)); return; }
+      if (s.err) { res.replaceChildren(this._el("div", "hint error", t.err + s.err)); return; }
+      if (!s.results?.length) { res.replaceChildren(this._el("div", "hint", s.results ? t.noresult : "")); return; }
+      const out = [];
+      for (const [cls, items] of groupResults(s.results)) {
+        out.push(this._el("div", "section", t.cls[cls] ?? cls));
+        out.push(...items.map((c) => this._itemRow(c)));
+      }
+      res.replaceChildren(...out);
+    });
+  }
+
+  _searches() {
+    try { const r = JSON.parse(localStorage.getItem("origami-music-searches") ?? "[]"); return Array.isArray(r) ? r : []; }
+    catch (e) { return []; }
+  }
+
+  _setSearches(list) {
+    try { localStorage.setItem("origami-music-searches", JSON.stringify(list.slice(0, 6))); } catch (e) { /* storage not available */ }
+    this._gen = (this._gen ?? 0) + 1;
+  }
+
+  _remember(id) {
+    const c = (this._search.results ?? []).find((x) => x?.media_content_id === id);
+    if (!c) return;
+    const r = { id, type: c.media_content_type, title: c.title ?? "", thumb: safeImage(c.thumbnail), cls: c.media_class, expand: !!c.can_expand };
+    this._setSearches([r, ...this._searches().filter((x) => x.id !== id)]);
+  }
+
+  // Library: filters, sort, liked songs pinned on top, the list; a tap opens the playlist, album or artist
+  _paneLib(pane) {
+    const t = this._t(), cfg = this._config;
+    if (pane.dataset.kind !== "lib") {
+      pane.dataset.kind = "lib";
+      pane.innerHTML = '<div class="chips"></div><div class="sortb" data-act="sort"></div><div class="list libl"></div>';
+    }
+    const f = this._filter ?? null, sort = this._sort ?? "recent";
+    const order = (type) => sort === "az" ? "sort_name" : sort === "added" ? "timestamp_added_desc" : type === "artist" ? "play_count_desc" : "last_played_desc";
+    const read = (type, limit) => this._libList(["lib", type, sort].join("|"), { media_type: type, order_by: order(type), limit, ...(type === "radio" ? { favorite: true } : {}) });
+    const lists = f ? [read(f, 60)] : [read("playlist", 20), read("album", 20), read("artist", 10)];
+    const items = lists.every((l) => l.items) ? interleave(lists.map((l) => l.items)) : null;
+    const chips = pane.querySelector(".chips");
+    this._paint(chips, f ?? "-", () => {
+      chips.replaceChildren(...[["playlist", "playlists"], ["album", "albums"], ["artist", "artists"], ["radio", "radio"], ["podcast", "podcasts"], ["audiobook", "audiobooks"]]
+        .map(([k, cat]) => { const c = this._el("div", "chip" + (k === f ? " on" : ""), t.cat[cat]); Object.assign(c.dataset, { act: "filter", k }); return c; }));
+    });
+    const sb = pane.querySelector(".sortb");
+    this._paint(sb, sort, () => sb.replaceChildren(this._icon("mdi:sort"), this._el("span", null, sort === "az" ? t.sortAZ : sort === "added" ? t.added : t.sortRecent)));
+    const list = pane.querySelector(".libl");
+    this._paint(list, [f, sort, items ? items.map((x) => x.uri).join(",") : "…", lists.map((l) => l.err ?? "").join("")].join("|"), () => {
+      const out = [];
+      if (!f || f === "playlist") {
+        const row = this._el("div", "row item lrow");
+        Object.assign(row.dataset, { act: "goto", k: "favs" });
+        const thumb = this._el("div", "thumb favtile");
+        thumb.append(this._icon("mdi:heart"));
+        const text = this._el("div", "text");
+        text.append(this._el("div", "title", t.liked), this._el("div", "sub", t.kind.playlist));
+        row.append(thumb, text);
+        out.push(row);
+      }
+      const err = lists.find((l) => l.err)?.err;
+      if (err) out.push(this._el("div", "hint error", t.err + err));
+      else if (!items) out.push(this._el("div", "hint", t.load));
+      else if (!items.length) out.push(this._el("div", "hint", t.nothing));
+      else out.push(...items.map((it) => {
+        const row = this._el("div", "row item lrow");
+        const type = it.media_type;
+        if (["radio", "track"].includes(type)) Object.assign(row.dataset, { act: "play-now", id: it.uri, type: "music" });
+        else Object.assign(row.dataset, { act: "open", id: it.uri, type, title: it.name ?? "" });
+        const thumb = this._thumb(it.image, ORIGAMI_MUSIC_ICONS[type] ?? "mdi:music");
+        if (type === "artist") thumb.classList.add("round");
+        const who = (it.artists ?? []).map((x) => x?.name).filter(Boolean).join(", ") || it.owner || "";
+        const text = this._el("div", "text");
+        text.append(this._el("div", "title", it.name ?? ""), this._el("div", "sub", [t.kind[type], who].filter(Boolean).join(" · ")));
+        row.append(thumb, text);
+        if (type === "radio") row.append(this._heart(it.uri));
+        return row;
+      }));
+      if (cfg.ma_path) {
+        const ma = this._el("div", "row item lrow mal");
+        Object.assign(ma.dataset, { act: "go", path: cfg.ma_path });
+        const thumb = this._el("div", "thumb");
+        thumb.append(this._icon("mdi:music-box-multiple-outline"));
+        ma.append(thumb, this._el("div", "title", t.openMA));
+        out.push(ma);
+      }
+      list.replaceChildren(...out);
+    });
+  }
+
+  // Mini player docked at the bottom of the pop-up: a tap opens the player, the heart likes the track
+  _renderMini(mini) {
+    const t = this._t(), { ma, st } = this._ctx, a = st?.attributes ?? {};
+    const show = !!ma && !!a.media_title && !["unavailable", "unknown"].includes(st?.state);
+    mini.hidden = !show;
+    if (!show) return;
+    const fav = this._fav(a.media_content_id);
+    const pic = typeof a.entity_picture === "string" ? a.entity_picture : null;
+    const group = this._groupNames().join(" + ");
+    this._paint(mini, [st.state, a.media_title, a.media_artist, pic, group, fav].join("|"), () => {
+      const art = this._el("div", "art");
+      this._art(art, pic, "mdi:music");
+      const text = this._el("div", "titles");
+      text.append(this._el("div", "name", a.media_title), this._el("div", "status", [a.media_artist, group].filter(Boolean).join(" · ")));
+      const pp = this._el("div", "pp");
+      pp.dataset.act = "mini-pp";
+      pp.append(this._icon(st.state === "playing" ? "mdi:pause" : "mdi:play"));
+      mini.replaceChildren(art, text, this._heart(a.media_content_id), pp);
+      mini.dataset.act = "mini";
+      mini.title = t.inplay;
+    });
+  }
+
+  _appClick(ev) {
+    const t = this._t(), cfg = this._config;
+    const tab = ev.target.closest(".tab2");
+    if (tab) { this._switchTab(tab.dataset.tab); return; }
+    const el = ev.target.closest("[data-act]");
+    if (!el) return;
+    const d = el.dataset, ma = this._ctx?.ma;
+    ev.stopPropagation();
+    if (d.act === "mini") this._go(cfg.player_path);
+    else if (d.act === "mini-pp") { if (ma) this._call("media_player.media_play_pause", { entity_id: ma }); }
+    else if (d.act === "resume") { if (ma) this._call("media_player.media_play", { entity_id: ma }); }
+    else if (d.act === "fav-toggle") this._favToggle(d.id);
+    else if (d.act === "zone") { this._zone = d.zone; this._renderApp(); }
+    else if (d.act === "top") { this._topOpen = !this._topOpen; this._renderApp(); }
+    else if (d.act === "trend-play") this._playTrend(Number(d.i), "play");
+    else if (d.act === "trend-next") this._playTrend(Number(d.i), "next");
+    else if (d.act === "fav-play") {
+      // The tapped track and the favorites after it, like a playlist
+      const uris = (window.__origamiMusicLists?.favs?.items ?? []).slice(Number(d.i)).map((x) => x.uri).filter(Boolean);
+      if (ma && uris.length) this._hass.callService("music_assistant", "play_media", { entity_id: ma, media_id: uris, enqueue: "replace" })
+        .then(() => this._toast(t.sent + (this._names()[ma] ?? ma)))
+        .catch((e) => this._toast(t.err + (e?.message ?? e)));
+    }
+    else if (d.act === "goto") {
+      if (d.k === "favs") { this._switchTab("lib"); this._browse("builtin://playlist/all_favorite_tracks", "playlist", t.liked); }
+      else if (d.k === "added") { this._filter = null; this._sort = "added"; this._switchTab("lib"); }
+      else { this._filter = d.k; this._switchTab("lib"); }
+    }
+    else if (d.act === "filter") { this._filter = this._filter === d.k ? null : d.k; this._renderApp(); }
+    else if (d.act === "sort") { this._sort = { recent: "az", az: "added", added: "recent" }[this._sort ?? "recent"]; this._renderApp(); }
+    else if (d.act === "searches-clear") { this._setSearches([]); this._renderApp(); }
+    else if (d.act === "search-del") { const r = this._searches(); r.splice(Number(d.i), 1); this._setSearches(r); this._renderApp(); }
+    else if (d.act === "go") this._go(d.path);
+    else {
+      if (this._tab === "search" && !this._stack.length && ["play", "next", "open", "play-now"].includes(d.act)) this._remember(d.id);
+      this._onClick(ev);
+    }
+  }
+
+  // A trending track: Music Assistant searches "artist title" on its providers, then the best match plays.
+  // Neither an ISRC nor the artist filter of the search service finds chart tracks reliably.
+  async _playTrend(i, enqueue) {
+    const t = this._t(), cfg = this._config, ma = this._ctx?.ma;
+    const zones = Object.keys(cfg.trends ?? {});
+    const sensor = this._hass.states[cfg.trends?.[zones.includes(this._zone) ? this._zone : zones[0]]];
+    const it = (sensor?.attributes?.tracks ?? [])[i];
+    if (!it || !ma) return;
+    this._toast(t.looking + it.title + "…");
+    try {
+      const entry = await this._entryId();
+      const r = await this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "search", return_response: true,
+        service_data: { config_entry_id: entry, name: it.artist + " " + it.title, media_type: ["track"], limit: 8 } });
+      const best = pickTrack(r?.response?.tracks, it.title, it.artist);
+      if (!best?.uri) { this._toast(t.notFound + it.title); return; }
+      this._play(best.uri, "music", enqueue);
+    } catch (e) {
+      this._toast(t.err + (e?.message ?? e));
+    }
+  }
+
+  // --- Now playing pop-up (layout: nowplaying): big cover, heart, progress, controls, speakers, volume --------
+
+  _renderNowPlaying() {
+    if (!this.shadowRoot || !this._ctx) return;
+    const t = this._t();
+    const { ma, st } = this._ctx;
+    const a = st?.attributes ?? {};
+    const live = ORIGAMI_MUSIC_LIVE.includes(st?.state);
+    const known = live || !!a.media_title;
+    const card = this._skel("nowp", '<div class="bigart"></div>'
+      + '<div class="ttl"><div class="titles"><div class="name"></div><div class="status"></div></div><div class="hslot"></div></div>'
+      + '<div class="prog"><div class="bar"><i></i></div><div class="times"><span class="pos"></span><span class="dur"></span></div></div>'
+      + '<div class="ctrls"><div class="c" data-c="shuffle"></div><div class="c" data-c="prev"></div><div class="c big" data-c="pp"></div>'
+      + '<div class="c" data-c="next"></div><div class="c" data-c="repeat"></div></div>'
+      + '<div class="devrow"><div class="dev" data-c="dev"><ha-icon icon="mdi:speaker"></ha-icon><span></span></div><span class="devn"></span>'
+      + '<div class="more" data-c="more"></div></div>'
+      + '<div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div><div class="toast"></div>',
+      (ev) => {
+        const h = ev.target.closest('[data-act="fav-toggle"]');
+        if (h) { this._favToggle(h.dataset.id); return; }
+        this._playerClick(ev);
+      });
+    if (!card._vol) { card._vol = true; this._wireVolume(card.querySelector(".vol")); }
+    const group = this._groupNames();
+    card.querySelector(".name").textContent = !ma ? t.nosel : known ? (a.media_title || t.playing) : t.idle;
+    card.querySelector(".status").textContent = known ? [a.media_artist, a.media_album_name].filter(Boolean)[0] ?? "" : "";
+    const pic = known && typeof a.entity_picture === "string" ? a.entity_picture : null;
+    if (card._pic !== pic) { card._pic = pic; this._art(card.querySelector(".bigart"), pic, "mdi:music"); }
+    const uri = known ? a.media_content_id : null, fav = this._fav(uri);
+    if (card._fav !== uri + "|" + fav) { card._fav = uri + "|" + fav; card.querySelector(".hslot").replaceChildren(this._heart(uri, "big")); }
+    card.querySelector(".dev span").textContent = group.join(" + ");
+    card.querySelector(".devn").textContent = group.length > 1 ? group.length + t.speakersN : "";
+    this._setIcon(card.querySelector('[data-c="more"]'), "mdi:dots-horizontal");
+    const sh = card.querySelector('[data-c="shuffle"]');
+    this._setIcon(sh, a.shuffle ? "mdi:shuffle" : "mdi:shuffle-disabled");
+    sh.classList.toggle("on", !!a.shuffle);
+    this._setIcon(card.querySelector('[data-c="prev"]'), "mdi:skip-previous");
+    this._setIcon(card.querySelector('[data-c="pp"]'), st?.state === "playing" ? "mdi:pause" : "mdi:play");
+    this._setIcon(card.querySelector('[data-c="next"]'), "mdi:skip-next");
+    const rp = card.querySelector('[data-c="repeat"]');
+    this._setIcon(rp, a.repeat === "one" ? "mdi:repeat-once" : a.repeat === "all" ? "mdi:repeat" : "mdi:repeat-off");
+    rp.classList.toggle("on", a.repeat === "one" || a.repeat === "all");
+    card.classList.toggle("dead", !st || ["unavailable", "unknown"].includes(st.state));
+    card.classList.toggle("idle", !live);
+    this._setIcon(card.querySelector(".vic"), (a.volume_level ?? 0) < 0.34 ? "mdi:volume-low" : (a.volume_level ?? 0) < 0.67 ? "mdi:volume-medium" : "mdi:volume-high");
+    if (!this._dragVol && this._volLocal == null) this._paintVol(card, a.volume_level ?? 0);
+    this._tick();
+    if (st?.state === "playing") { if (!this._tickT) this._tickT = setInterval(() => this._tick(), 1000); }
+    else { clearInterval(this._tickT); this._tickT = null; }
+  }
+
   disconnectedCallback() {
     // Bubble Card rebuilds a pop-up's content when it opens again, so everything starts over then
     clearInterval(this._tickT);
@@ -1175,10 +1815,135 @@ const ORIGAMI_MUSIC_CSS = `
   .albums .act.main { background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
   .cname { font-size: var(--ha-font-size-s, 12px); font-weight: var(--ha-font-weight-medium, 500); color: var(--primary-text-color);
     display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; line-height: 1.3; }
+  /* Music pop-up with Spotify-like navigation (app) and the now playing pop-up (nowplaying) */
+  ha-card.app { background: none; box-shadow: none; border: 0; padding: 0; gap: 18px;
+    min-height: calc(100vh - 180px); min-height: calc(100dvh - 180px); }
+  ha-card.app .toast, ha-card.nowp .toast { position: fixed; bottom: 104px; z-index: 5; }
+  .tabs2 { display: flex; gap: 8px; }
+  .tab2 { height: 40px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; display: flex; align-items: center; cursor: pointer;
+    background: var(--fill-subtle, #eae8e4); color: var(--primary-text-color); font-size: 15px; font-weight: 700; user-select: none;
+    -webkit-tap-highlight-color: transparent; }
+  .tab2.on { background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
+  .pane { display: flex; flex-direction: column; gap: 18px; }
+  .sec { display: flex; flex-direction: column; gap: 12px; }
+  .sec:empty { display: none; }
+  ha-card.app .hd { padding: 4px 4px 0 0; }
+  ha-card.app .ht { font-size: 21px; display: flex; align-items: center; gap: 8px; --mdc-icon-size: 20px; }
+  ha-card.app .ht ha-icon { color: #c9785c; }
+  .rcard { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 26px; cursor: pointer;
+    background: var(--ha-card-background, #fff); box-shadow: var(--card-elevation-flat, 0 6px 18px rgba(74, 70, 64, 0.08)); }
+  .rcard:active, .rtile:active, .trow:active, .radio:active, .art2:active, .lrow:active, .cat2:active { transform: scale(0.98); }
+  .art.rart { width: 72px; height: 72px; border-radius: 20px; box-shadow: 0 6px 14px rgba(74, 70, 64, 0.18); --mdc-icon-size: 30px; }
+  .rlab { font-size: 13px; font-weight: 700; color: var(--secondary-text-color); }
+  .rcard .name { font-size: 17px; }
+  .rcard .status { font-size: 13px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .rcard .pp.big { width: 52px; height: 52px; }
+  .rgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .rtile { height: 58px; border-radius: 14px; background: var(--fill-subtle, #eae8e4); display: flex; align-items: center; gap: 10px;
+    overflow: hidden; cursor: pointer; }
+  .rtile .thumb { width: 58px; height: 58px; border-radius: 0; flex: none; }
+  .rtile span { padding-right: 10px; font-size: 13px; font-weight: 700; line-height: 1.25; color: var(--primary-text-color);
+    display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .zones { display: flex; align-items: center; gap: 8px; margin-top: -4px; }
+  .zone { height: 34px; box-sizing: border-box; padding: 0 14px; border-radius: 999px; display: flex; align-items: center; cursor: pointer;
+    border: 1.5px solid color-mix(in srgb, var(--primary-text-color, #4a4640) 16%, transparent); background: var(--ha-card-background, #fff);
+    font-size: 14px; font-weight: 700; color: var(--primary-text-color); }
+  .zone.on { border: 0; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
+  .maj { margin-left: auto; font-size: 12px; font-weight: 600; color: var(--secondary-text-color); white-space: nowrap; }
+  .tlist { border-radius: 26px; background: var(--ha-card-background, #fff); box-shadow: var(--card-elevation-flat, 0 6px 18px rgba(74, 70, 64, 0.08));
+    padding: 4px 8px 4px 12px; display: flex; flex-direction: column; }
+  .trow { height: 64px; display: flex; align-items: center; gap: 12px; cursor: pointer; }
+  .trow + .trow { border-top: 1px solid color-mix(in srgb, var(--primary-text-color, #4a4640) 8%, transparent); }
+  .rank { width: 34px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 1px; }
+  .rank b { font-size: 18px; font-weight: 700; color: var(--primary-text-color); }
+  .rank i { font-style: normal; font-size: 10px; font-weight: 700; white-space: nowrap; }
+  .move-up { color: #5f8a4c; } .move-down { color: #b0674c; } .move-same { color: var(--secondary-text-color); }
+  .move-new { color: var(--state-media_player-active-color, #6f93ab); }
+  .trow .thumb { width: 48px; height: 48px; border-radius: 12px; }
+  .trow .title { font-size: 15px; } .trow .sub { font-size: 12px; font-weight: 600; }
+  .nextb { width: 40px; height: 40px; flex: none; border-radius: 13px; background: var(--fill-subtle, #f4f3f0); display: flex;
+    align-items: center; justify-content: center; color: var(--primary-text-color); --mdc-icon-size: 20px; cursor: pointer; }
+  .rad, .arts { display: flex; gap: 14px; overflow-x: auto; scrollbar-width: none; padding-bottom: 4px; }
+  .rad::-webkit-scrollbar, .arts::-webkit-scrollbar { display: none; }
+  .radio { width: 76px; flex: none; display: flex; flex-direction: column; gap: 6px; cursor: pointer; }
+  .radio .sq { width: 76px; height: 76px; border-radius: 22px; color: #fff; display: flex; align-items: center; justify-content: center;
+    font-size: 19px; font-weight: 700; box-shadow: 0 4px 12px rgba(74, 70, 64, 0.14); overflow: hidden;
+    box-sizing: border-box; padding: 0 6px; white-space: nowrap; text-overflow: ellipsis; }
+  .radio .sq.long { font-size: 14px; }
+  .radio .lab { font-size: 13px; font-weight: 700; color: var(--primary-text-color); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  ha-card.app .shelf.big .ckind { display: block; margin-top: -4px; font-size: 12px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  ha-card.app .shelf.big .cname { display: block; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .art2 { width: 92px; flex: none; display: flex; flex-direction: column; align-items: center; gap: 8px; cursor: pointer; }
+  .art2 .thumb { width: 92px; height: 92px; border-radius: 999px; box-shadow: 0 4px 12px rgba(74, 70, 64, 0.14); --mdc-icon-size: 32px; }
+  .art2 span { max-width: 92px; font-size: 13px; font-weight: 700; text-align: center; color: var(--primary-text-color);
+    overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mini { position: sticky; bottom: var(--origami-music-mini-bottom, 12px); z-index: 3; height: 64px; box-sizing: border-box;
+    padding: 8px 10px 8px 8px; border-radius: 22px; background: var(--ha-card-background, #fff); cursor: pointer;
+    box-shadow: 0 8px 22px rgba(74, 70, 64, 0.16); display: flex; align-items: center; gap: 12px; }
+  .mini[hidden] { display: none; }
+  .mini .art { width: 48px; height: 48px; border-radius: 14px; }
+  .mini .name { font-size: 15px; }
+  .mini .status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .mini .pp { width: 44px; height: 44px; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
+  .heart { flex: none; width: 40px; height: 40px; border-radius: 13px; display: flex; align-items: center; justify-content: center;
+    color: var(--secondary-text-color); --mdc-icon-size: 22px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
+  .heart.on { color: #c9785c; }
+  .heart[hidden] { display: none; }
+  .heart:active { transform: scale(0.9); }
+  ha-card.app .search { height: 52px; border-radius: 18px; padding: 0 16px; background: var(--ha-card-background, #fff);
+    box-shadow: var(--card-elevation-flat, 0 6px 18px rgba(74, 70, 64, 0.08)); color: var(--primary-text-color); }
+  ha-card.app .search input { font-size: 16px; font-weight: 600; }
+  .sres { display: flex; flex-direction: column; gap: 4px; }
+  .sres.busy { opacity: 0.45; transition: opacity 0.15s; pointer-events: none; }
+  .list { display: flex; flex-direction: column; }
+  .lrow { min-height: 68px; padding: 4px 0; gap: 14px; }
+  .lrow .thumb { width: 60px; height: 60px; border-radius: 14px; box-shadow: 0 2px 8px rgba(74, 70, 64, 0.10); --mdc-icon-size: 26px; }
+  .thumb.round { border-radius: 999px; }
+  .lrow .title { font-size: 16px; } .lrow .sub { font-size: 13px; font-weight: 600; }
+  .favtile { background: color-mix(in srgb, #c9785c 18%, var(--ha-card-background, #fff)); color: #c9785c; }
+  .mal .thumb { background: var(--fill-subtle, #eae8e4); }
+  .x { width: 40px; height: 40px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color);
+    --mdc-icon-size: 18px; cursor: pointer; }
+  .cats2 { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .cat2 { position: relative; height: 72px; box-sizing: border-box; padding: 12px 14px; border-radius: 20px; overflow: hidden;
+    font-size: 15px; font-weight: 700; cursor: pointer; }
+  .cat2 ha-icon { position: absolute; right: 10px; bottom: 6px; --mdc-icon-size: 40px; transform: rotate(-12deg); opacity: 0.9; }
+  .chips { display: flex; gap: 8px; overflow-x: auto; scrollbar-width: none; margin: 0 -4px; padding: 0 4px; }
+  .chips::-webkit-scrollbar { display: none; }
+  .chip { flex: none; height: 34px; box-sizing: border-box; padding: 0 14px; border-radius: 999px; display: flex; align-items: center; cursor: pointer;
+    border: 1.5px solid color-mix(in srgb, var(--primary-text-color, #4a4640) 16%, transparent); background: var(--ha-card-background, #fff);
+    font-size: 14px; font-weight: 700; color: var(--primary-text-color); }
+  .chip.on { border: 0; background: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 18%, var(--ha-card-background, #fff));
+    color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); }
+  .sortb { align-self: flex-start; height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; font-weight: 700;
+    color: var(--primary-text-color); --mdc-icon-size: 18px; }
+  .playall { align-self: flex-start; display: flex; align-items: center; gap: 8px; height: 44px; box-sizing: border-box; padding: 0 18px 0 14px;
+    border-radius: 999px; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); font-size: 15px; font-weight: 700;
+    cursor: pointer; --mdc-icon-size: 22px; margin-bottom: 4px; }
+  ha-card.app .back { font-size: 17px; }
+  ha-card.nowp { background: none; box-shadow: none; border: 0; padding: 0 4px; gap: 18px; }
+  .bigart { width: 100%; aspect-ratio: 1; border-radius: 30px; overflow: hidden; box-shadow: 0 14px 34px rgba(74, 70, 64, 0.22);
+    background: var(--fill-subtle, #eae8e4); display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color);
+    --mdc-icon-size: 72px; }
+  .bigart img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  ha-card.nowp.idle .bigart { opacity: 0.75; }
+  .ttl { display: flex; align-items: center; gap: 12px; padding-top: 4px; }
+  ha-card.nowp .name { font-size: 24px; white-space: normal; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  ha-card.nowp .status { font-size: 16px; font-weight: 600; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .heart.big { width: 48px; height: 48px; border-radius: 16px; background: var(--fill-subtle, #eae8e4); --mdc-icon-size: 26px; }
+  .heart.big.on { background: color-mix(in srgb, #c9785c 18%, var(--ha-card-background, #fff)); }
+  .devrow { display: flex; align-items: center; gap: 12px; }
+  .dev { min-width: 0; height: 44px; box-sizing: border-box; padding: 0 16px 0 12px; border-radius: 999px; display: flex; align-items: center; gap: 8px;
+    background: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 18%, var(--ha-card-background, #fff));
+    color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); font-size: 14px; font-weight: 700; cursor: pointer; --mdc-icon-size: 18px; }
+  .dev span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .devn { flex: none; font-size: 13px; font-weight: 600; color: var(--secondary-text-color); }
+  .devrow .more { margin-left: auto; width: 44px; height: 44px; border-radius: 14px; }
+  ha-card.nowp.dead .ctrls, ha-card.nowp.dead .vol { opacity: var(--opacity-disabled, 0.4); pointer-events: none; }
 `;
 
 if (typeof customElements !== "undefined" && !customElements.get("origami-music")) {
   customElements.define("origami-music", OrigamiMusic);
   window.customCards = window.customCards || [];
-  window.customCards.push({ type: "origami-music", name: "Origami Music", description: "Now playing, speakers, queue and library for Music Assistant" });
+  window.customCards.push({ type: "origami-music", name: "Origami Music", description: "Now playing, speakers, queue, library, search and charts for Music Assistant" });
 }

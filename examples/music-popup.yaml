@@ -1,0 +1,39 @@
+# The music pop-up, the now playing pop-up and the speakers pop-up. The chart sensors are in the README.
+type: vertical-stack
+cards:
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#music"
+    name: Music
+  - &music
+    type: custom:origami-music
+    layout: app
+    select: input_select.speaker
+    players:
+      media_player.living_room_speaker: media_player.living_room
+      media_player.kitchen_speaker: media_player.kitchen
+      media_player.bedroom_speaker: media_player.bedroom
+    names:
+      media_player.living_room_speaker: Living room
+      media_player.kitchen_speaker: Kitchen
+      media_player.bedroom_speaker: Bedroom
+    player_path: "#now-playing"
+    speakers_path: "#speakers"
+    trends:
+      France: sensor.charts_france
+      World: sensor.charts_world
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#now-playing"
+    name: Now playing
+  - <<: *music
+    layout: nowplaying
+  - <<: *music
+    layout: queue
+    limit: 4
+  - type: custom:bubble-card
+    card_type: pop-up
+    hash: "#speakers"
+    name: Listen on
+  - <<: *music
+    layout: speakers
