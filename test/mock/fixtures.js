@@ -46,6 +46,8 @@ const SEARCH_TRACKS = [
   { name: "Neon Avenue", uri: "spotify://track/neon", artists: [{ name: "Kite Club" }, { name: "Mira Vale" }] },
 ];
 
+let ORIGAMI_EMPTY_SEARCH = false;
+
 const item = (media_class, title, id, n) => ({ media_class, media_content_type: "music", media_content_id: id, title,
                                                 thumbnail: n ? cover(n) : null, can_play: true, can_expand: media_class === "artist" });
 
@@ -76,7 +78,7 @@ const states = (idle, stopped) => {
 
 const ws = {
   "config_entries/get": [{ entry_id: "music_assistant", domain: "music_assistant" }],
-  call_service: ({ service, service_data }) => (service === "search" ? { response: { tracks: service_data.name.includes("Late Bloom")
+  call_service: ({ service, service_data }) => (service === "search" ? { response: { tracks: ORIGAMI_EMPTY_SEARCH ? [] : service_data.name.includes("Late Bloom")
     ? [{ name: "Early Bloom", uri: "spotify://track/early", artists: [{ name: "Mira Vale" }] },
        { name: "Late Bloom (feat. Juno Park)", uri: "spotify://track/bloom", artists: [{ name: "Mira Vale" }] }]
     : SEARCH_TRACKS } }
@@ -122,6 +124,7 @@ const sheet = (column, title) => {
 const slowWs = { ...ws, "media_player/search_media": (m) => new Promise((r) => setTimeout(() => r(ws["media_player/search_media"](m)), 1000)) };
 
 export async function show(name, params, column) {
+  ORIGAMI_EMPTY_SEARCH = params.has("emptysearch");
   const hass = createHass({ states: states(params.has("idle"), params.has("stopped")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
   if (params.get("error")) hass.callWS = () => Promise.reject(new Error(params.get("error")));
   const extra = params.get("solo") ? { solo: [params.get("solo")] } : {};

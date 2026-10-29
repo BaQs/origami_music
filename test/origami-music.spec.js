@@ -370,3 +370,19 @@ test("a solo speaker is left out of also play on", async ({ page }) => {
   await open(page, "fixture=group&solo=media_player.living_room");
   await expect(card(page, "group").locator(".ghint")).toHaveText("Living room plays alone, so no group is possible");
 });
+
+test("the speaker bar says where playback goes and opens listen on", async ({ page }) => {
+  await open(page, "fixture=app");
+  const bar = card(page, "app").locator(".devbar");
+  await expect(bar).toContainText("Playing on");
+  await expect(bar).toContainText("Living room + Kitchen");
+  await bar.click();
+  expect(await page.evaluate(() => location.hash)).toBe("#speakers");
+});
+
+test("a trending track Spotify can't return shows a retry message, not a dead end", async ({ page }) => {
+  await open(page, "fixture=app&emptysearch");
+  const app = card(page, "app");
+  await app.locator(".trow").first().click();
+  await expect(app.locator(".toast")).toHaveText("Spotify did not respond, try again later");
+});

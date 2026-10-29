@@ -143,7 +143,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Tes artistes", liked: "Titres favoris", recentSearches: "Recherches récentes", clear: "Tout effacer", browse: "Parcourir",
     added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
     like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
-    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…",
+    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…", playingOn: "Lecture sur ", searchSlow: "Spotify n'a pas répondu, réessaie plus tard",
     group: "Groupe", volumes: "Volume de chaque enceinte", quiet: "Doux", medium: "Moyen", loud: "Fort",
     alsoOn: "Écouter aussi sur", ungroup: "Dégrouper", allSpeakers: "Toutes",
   },
@@ -168,7 +168,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Your artists", liked: "Liked songs", recentSearches: "Recent searches", clear: "Clear all", browse: "Browse",
     added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
     like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
-    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…",
+    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…", playingOn: "Playing on ", searchSlow: "Spotify did not respond, try again later",
     group: "Group", volumes: "Volume of each speaker", quiet: "Quiet", medium: "Medium", loud: "Loud",
     alsoOn: "Also play on", ungroup: "Ungroup", allSpeakers: "All",
   },
@@ -1260,7 +1260,7 @@ class OrigamiMusic extends OrigamiBase {
     if (!this.shadowRoot || !this._ctx) return;
     const t = this._t();
     if (!["home", "search", "lib"].includes(this._tab)) this._tab = "home";
-    const card = this._skel("app", '<div class="tabs2"></div><div class="pane"></div><div class="mini" hidden></div><div class="toast"></div>',
+    const card = this._skel("app", '<div class="tabs2"></div><div class="devbar" hidden></div><div class="pane"></div><div class="mini" hidden></div><div class="toast"></div>',
       (ev) => this._appClick(ev));
     if (!card._wired) {
       card._wired = true;
@@ -1268,6 +1268,7 @@ class OrigamiMusic extends OrigamiBase {
         .map(([k, l]) => `<div class="tab2" data-tab="${k}">${omEsc(l)}</div>`).join("");
     }
     for (const c of card.querySelectorAll(".tab2")) c.classList.toggle("on", c.dataset.tab === this._tab);
+    this._renderDevbar(card.querySelector(".devbar"));
     this._renderMini(card.querySelector(".mini"));
     const pane = card.querySelector(".pane");
     if (this._stack.length) {
@@ -1579,6 +1580,20 @@ class OrigamiMusic extends OrigamiBase {
     });
   }
 
+  // The speaker bar: says on which speaker a tap will play, and opens "listen on" to change it
+  _renderDevbar(bar) {
+    const t = this._t(), path = this._config.speakers_path;
+    const group = this._groupNames();
+    const label = group.length ? group.join(" + ") : this._speakerName(this._ctx.chosen, this._ctx.ma);
+    bar.hidden = !path || !label;
+    if (bar.hidden) return;
+    this._paint(bar, "dev|" + label, () => {
+      bar.replaceChildren(this._icon("mdi:speaker"), this._el("span", "devpre", t.playingOn),
+        this._el("span", "devname", label), this._icon("mdi:chevron-down"));
+      bar.dataset.act = "go"; bar.dataset.path = path;
+    });
+  }
+
   // Mini player docked at the bottom of the pop-up: a tap opens the player, the heart likes the track
   _renderMini(mini) {
     const t = this._t(), { ma, st } = this._ctx, a = st?.attributes ?? {};
@@ -1652,13 +1667,16 @@ class OrigamiMusic extends OrigamiBase {
     this._toast(t.looking + it.title + "…");
     try {
       const entry = await this._entryId();
-      const r = await this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "search", return_response: true,
+      const search = this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "search", return_response: true,
         service_data: { config_entry_id: entry, name: it.artist + " " + it.title, media_type: ["track"], limit: 8 } });
+      const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000));
+      const r = await Promise.race([search, timeout]);
       const best = pickTrack(r?.response?.tracks, it.title, it.artist);
-      if (!best?.uri) { this._toast(t.notFound + it.title); return; }
+      // A chart hit always exists; an empty result means the Spotify provider is throttled, not that the track is missing
+      if (!best?.uri) { this._toast(t.searchSlow); return; }
       this._play(best.uri, "music", enqueue);
     } catch (e) {
-      this._toast(t.err + (e?.message ?? e));
+      this._toast(e?.message === "timeout" ? t.searchSlow : t.err + (e?.message ?? e));
     }
   }
 
@@ -1955,6 +1973,14 @@ const ORIGAMI_MUSIC_CSS = `
     min-height: calc(100vh - 180px); min-height: calc(100dvh - 180px); }
   ha-card.app .toast, ha-card.nowp .toast { position: fixed; bottom: 104px; z-index: 5; }
   .tabs2 { display: flex; gap: 8px; }
+  .devbar { display: flex; align-items: center; gap: 8px; height: 44px; box-sizing: border-box; padding: 0 14px; cursor: pointer;
+    border-radius: 999px; background: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 16%, var(--ha-card-background, #fff));
+    color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640));
+    font-size: 15px; font-weight: 700; --mdc-icon-size: 20px; }
+  .devbar[hidden] { display: none; }
+  .devbar:active { transform: scale(0.99); }
+  .devbar .devpre { font-weight: 600; color: var(--secondary-text-color); }
+  .devbar .devname { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .tab2 { height: 40px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; display: flex; align-items: center; cursor: pointer;
     background: var(--fill-subtle, #eae8e4); color: var(--primary-text-color); font-size: 15px; font-weight: 700; user-select: none;
     -webkit-tap-highlight-color: transparent; }
