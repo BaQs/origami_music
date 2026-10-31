@@ -104,7 +104,8 @@ const ORIGAMI_MUSIC_CLASSES = ["artist", "album", "track", "playlist", "podcast"
 function groupResults(results) {
   const groups = new Map();
   for (const r of results ?? []) {
-    const k = ORIGAMI_MUSIC_CLASSES.includes(r?.media_class) ? r.media_class : "other";
+    const id = r?.media_content_id ?? r?.uri ?? "";
+    const k = ORIGAMI_MUSIC_CLASSES.includes(r?.media_class) ? r.media_class : /radiobrowser|radio/i.test(id) ? "radio" : "other";
     if (!groups.has(k)) groups.set(k, []);
     groups.get(k).push(r);
   }
@@ -143,7 +144,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Tes artistes", liked: "Titres favoris", recentSearches: "Recherches récentes", clear: "Tout effacer", browse: "Parcourir",
     added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
     like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
-    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…", playingOn: "Lecture sur ", searchSlow: "Spotify n'a pas répondu, réessaie plus tard",
+    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…", playingOn: "Lecture sur ", searchSlow: "Spotify n'a pas répondu, réessaie plus tard", localOnly: "Spotify n'a pas répondu : résultats locaux seulement",
     group: "Groupe", volumes: "Volume de chaque enceinte", quiet: "Doux", medium: "Moyen", loud: "Fort",
     alsoOn: "Écouter aussi sur", ungroup: "Dégrouper", allSpeakers: "Toutes",
   },
@@ -168,7 +169,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Your artists", liked: "Liked songs", recentSearches: "Recent searches", clear: "Clear all", browse: "Browse",
     added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
     like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
-    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…", playingOn: "Playing on ", searchSlow: "Spotify did not respond, try again later",
+    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…", playingOn: "Playing on ", searchSlow: "Spotify did not respond, try again later", localOnly: "Spotify did not respond: local results only",
     group: "Group", volumes: "Volume of each speaker", quiet: "Quiet", medium: "Medium", loud: "Loud",
     alsoOn: "Also play on", ungroup: "Ungroup", allSpeakers: "All",
   },
@@ -1486,13 +1487,15 @@ class OrigamiMusic extends OrigamiBase {
       });
       return;
     }
-    this._paint(res, ["res", s.q, s.loading ? 1 : 0, s.results?.length ?? -1, s.err ?? ""].join("|"), () => {
+    this._paint(res, ["res", s.q, s.loading ? 1 : 0, s.results?.length ?? -1, s.err ?? "", (s.results ?? []).some((r) => /spotify|deezer|tidal|qobuz|apple|ytmusic/i.test(r.media_content_id ?? r.uri ?? "")) ? 1 : 0].join("|"), () => {
       // While a search loads, the rows in place stay (dimmed), so the pop-up keeps its height
       res.classList.toggle("busy", s.loading && res.childElementCount > 0);
       if (s.loading) { if (!res.childElementCount) res.replaceChildren(this._el("div", "hint", t.load)); return; }
       if (s.err) { res.replaceChildren(this._el("div", "hint error", t.err + s.err)); return; }
       if (!s.results?.length) { res.replaceChildren(this._el("div", "hint", s.results ? t.noresult : "")); return; }
       const out = [];
+      // Only local library and radios came back (Spotify did not contribute): say so, instead of looking complete
+      if (!s.results.some((r) => /spotify|deezer|tidal|qobuz|apple|ytmusic/i.test(r.media_content_id ?? r.uri ?? ""))) out.push(this._el("div", "hint", t.localOnly));
       for (const [cls, items] of groupResults(s.results)) {
         out.push(this._el("div", "section", t.cls[cls] ?? cls));
         out.push(...items.map((c) => this._itemRow(c)));

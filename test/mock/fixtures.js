@@ -47,6 +47,7 @@ const SEARCH_TRACKS = [
 ];
 
 let ORIGAMI_EMPTY_SEARCH = false;
+let ORIGAMI_LOCAL_SEARCH = false;
 
 const item = (media_class, title, id, n) => ({ media_class, media_content_type: "music", media_content_id: id, title,
                                                 thumbnail: n ? cover(n) : null, can_play: true, can_expand: media_class === "artist" });
@@ -88,10 +89,15 @@ const ws = {
   "bubble_card_tools/ma_queue_items": { items: queue },
   "bubble_card_tools/ma_queue_command": {},
   "auth/sign_path": ({ path }) => ({ path }),
-  "media_player/search_media": () => ({ result: [
+  "media_player/search_media": () => ORIGAMI_LOCAL_SEARCH ? { result: [
+    { media_class: "playlist", media_content_type: "music", media_content_id: "library://playlist/9", title: "Halloween party", thumbnail: cover(3), can_play: true },
+    { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a1", title: "Halloween Radio", can_play: true },
+    { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a2", title: "Halloween Hit Radio", can_play: true },
+  ] } : { result: [
     item("artist", "The Lanterns", "library://artist/1"), item("album", "Evening Lights", "library://album/1", 1),
     item("album", "Field Notes", "library://album/5", 4), item("track", "Golden Hour", "library://track/100", 1),
-  ] }),
+    { media_class: "track", media_content_type: "music", media_content_id: "spotify--x://track/sn1", title: "Spooky Night", thumbnail: cover(2), can_play: true },
+  ] },
   "media_player/browse_media": ({ media_content_id }) => {
     if (!media_content_id) {
       return { children: ["artists", "albums", "tracks", "playlists", "radio", "podcasts", "audiobooks"].map((id) => ({
@@ -125,6 +131,7 @@ const slowWs = { ...ws, "media_player/search_media": (m) => new Promise((r) => s
 
 export async function show(name, params, column) {
   ORIGAMI_EMPTY_SEARCH = params.has("emptysearch");
+  ORIGAMI_LOCAL_SEARCH = params.has("localsearch");
   const hass = createHass({ states: states(params.has("idle"), params.has("stopped")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
   if (params.get("error")) hass.callWS = () => Promise.reject(new Error(params.get("error")));
   const extra = params.get("solo") ? { solo: [params.get("solo")] } : {};

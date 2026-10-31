@@ -386,3 +386,30 @@ test("a trending track Spotify can't return shows a retry message, not a dead en
   await app.locator(".trow").first().click();
   await expect(app.locator(".toast")).toHaveText("Spotify did not respond, try again later");
 });
+
+test("search shows radios under Radio, not Other", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("golden");
+  await expect(app.locator(".sres .section")).not.toHaveText(["Other"]);
+});
+
+test("when only local results come back, search says Spotify did not respond", async ({ page }) => {
+  await open(page, "fixture=app&localsearch");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("halloween");
+  await expect(app.locator(".sres .hint")).toHaveText("Spotify did not respond: local results only");
+  await expect(app.locator(".sres .section", { hasText: "Radio" })).toHaveCount(1);
+  await expect(app.locator(".sres").getByText("Halloween Radio")).toHaveCount(1);
+});
+
+test("a normal search does not show the local-only hint", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("golden");
+  await expect(app.locator(".sres")).toContainText("Golden Hour");
+  await expect(app.locator(".sres .hint")).toHaveCount(0);
+});
