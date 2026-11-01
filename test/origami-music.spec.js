@@ -184,3 +184,231 @@ test("every player of a group reports the same members, and the first one leads"
   await expect(speakers.locator('.spk[data-p="media_player.kitchen"]')).toContainText("With Living room");
 });
 
+
+test("the music pop-up opens on Home with the library, the charts and a mini player", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await expect(app.locator(".tab2.on")).toHaveText("Home");
+  await expect(app.locator(".rtile")).toHaveCount(6);
+  await expect(app.locator(".trow")).toHaveCount(5);
+  await expect(app.locator(".radio")).toHaveCount(4);
+  await expect(app.locator(".favs .cover")).toHaveCount(5);
+  await expect(app.locator(".art2")).toHaveCount(4);
+  await expect(app.locator(".resume .rcard")).toHaveCount(0);
+  await expect(app.locator(".mini")).toContainText("Golden Hour");
+  await expect(app.locator(".mini")).toContainText("The Lanterns · Living room + Kitchen");
+  await app.locator(".mini .titles").click();
+  expect(await page.evaluate(() => location.hash)).toBe("#player");
+});
+
+test("Resume plays the queue of a stopped speaker again, or the last playlist", async ({ page }) => {
+  await open(page, "fixture=app&stopped");
+  await card(page, "app").locator(".rcard", { hasText: "Golden Hour" }).click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "media_play", data: { entity_id: "media_player.living_room" } }));
+  await open(page, "fixture=app&idle");
+  await card(page, "app").locator(".rcard", { hasText: "Sunday Morning" }).click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "library://playlist/1", enqueue: "replace" }) }));
+});
+
+test("trending tracks show how they moved, and a tap plays the best match from Music Assistant", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  const rows = app.locator(".trow");
+  await expect(rows.nth(0)).toContainText("▲ 1");
+  await expect(rows.nth(1)).toContainText("▼ 1");
+  await expect(rows.nth(2)).toContainText("=");
+  await expect(rows.nth(4)).toContainText("new");
+  await expect(app.locator(".maj")).toHaveText("Updated today");
+  await expect(app.locator(".tmore")).toHaveText("See the top 7");
+  await app.locator(".tmore").click();
+  await expect(rows).toHaveCount(7);
+  await expect(app.locator(".tmore")).toHaveText("See less");
+  await app.locator(".tmore").click();
+  await expect(rows).toHaveCount(5);
+  await rows.nth(0).click();
+  await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "spotify--x://track/neon", enqueue: "play" }) }));
+  expect(await ws(page, "media_player/search_media")).toContainEqual(expect.objectContaining({ search_query: "Kite Club Neon Avenue" }));
+  await app.locator('.zone[data-zone="World"]').click();
+  await expect(rows).toHaveCount(3);
+  await expect(app.locator(".tmore")).toHaveCount(0);
+  await expect(rows.nth(0)).toContainText("Static");
+  // A "(feat. ...)" on one side only still finds the track, over a first result with another title
+  await rows.nth(1).locator(".nextb").click();
+  await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "spotify--x://track/bloom", enqueue: "next" }) }));
+});
+
+test("the heart adds the playing track to the favorites", async ({ page }) => {
+  await open(page, "fixture=app");
+  const heart = card(page, "app").locator(".mini .heart");
+  await expect(heart).not.toHaveClass(/on/);
+  await heart.click();
+  expect(await ws(page, "bubble_card_tools/ma_favorite_set")).toContainEqual(expect.objectContaining({ uri: "library://track/100", favorite: true }));
+  await expect(card(page, "app").locator(".mini .heart")).toHaveClass(/on/);
+  await expect(card(page, "app").locator(".toast")).toHaveText("Added to your favorites");
+});
+
+test("a radio and a liked song play in one tap", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator(".radio", { hasText: "Harbour FM" }).click();
+  await app.locator(".favs .cover", { hasText: "Paper Boats" }).click();
+  const done = await calls(page);
+  expect(done).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "library://radio/2", enqueue: "replace" }) }));
+  expect(done).toContainEqual(expect.objectContaining({ domain: "music_assistant", service: "play_media",
+    data: { entity_id: "media_player.living_room", media_id: ["library://track/102", "library://track/103", "library://track/104", "library://track/105"], enqueue: "replace" } }));
+});
+
+test("the search tab keeps the recent searches on this device", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await expect(app.locator(".cat2")).toHaveCount(6);
+  await app.locator(".search input").fill("golden");
+  await app.locator('.act[data-act="play"][data-id="library://track/100"]').click();
+  await app.locator(".search input").fill("");
+  await expect(app.locator(".lrow", { hasText: "Golden Hour" })).toHaveCount(1);
+  await app.locator(".lrow .x").click();
+  await expect(app.locator(".lrow")).toHaveCount(0);
+});
+
+test("the library tab filters the library and opens the liked songs with Play all", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="lib"]').click();
+  await expect(app.locator(".lrow").first()).toContainText("Liked songs");
+  await app.locator('.chip[data-k="album"]').click();
+  await expect(app.locator(".lrow").first()).toContainText("Evening Lights");
+  await app.locator('.chip[data-k="album"]').click();
+  await app.locator(".lrow", { hasText: "Liked songs" }).click();
+  await expect(app.locator(".back")).toContainText("Liked songs");
+  await app.locator(".playall").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "builtin://playlist/all_favorite_tracks", enqueue: "replace" }) }));
+  await app.locator(".back").click();
+  await expect(app.locator(".chips")).toBeVisible();
+});
+
+test("the now playing pop-up shows the group and opens the speakers", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const now = card(page, "nowp");
+  await expect(now).toContainText("Golden Hour");
+  await expect(now.locator(".dev")).toHaveText("Living room + Kitchen");
+  await expect(now.locator(".devn")).toHaveText("2 speakers");
+  await now.locator(".dev").click();
+  expect(await page.evaluate(() => location.hash)).toBe("#speakers");
+  await now.locator(".heart").click();
+  expect(await ws(page, "bubble_card_tools/ma_favorite_set")).toContainEqual(expect.objectContaining({ uri: "library://track/100", favorite: true }));
+});
+
+test("the music pop-up speaks French with a French Home Assistant", async ({ page }) => {
+  await open(page, "fixture=app&lang=fr");
+  const app = card(page, "app");
+  await expect(app.locator(".tabs2")).toContainText("Accueil");
+  await expect(app).toContainText("Tendances du moment");
+  await expect(app.locator(".maj")).toHaveText("Mis à jour aujourd'hui");
+});
+
+test("the volume of a group moves every speaker of the group by the same step", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const vol = card(page, "nowp").locator(".vrow .vol");
+  await expect(vol.locator(".vpct")).toContainText("Group · ");
+  const box = await vol.boundingBox();
+  await page.mouse.click(box.x + box.width * 0.6, box.y + box.height / 2);
+  await expect.poll(async () => (await calls(page)).filter((c) => c.service === "volume_set").map((c) => c.data.entity_id).sort())
+    .toEqual(["media_player.kitchen", "media_player.living_room"]);
+  const set = Object.fromEntries((await calls(page)).filter((c) => c.service === "volume_set").map((c) => [c.data.entity_id, c.data.volume_level]));
+  expect(set["media_player.living_room"] - set["media_player.kitchen"]).toBeCloseTo(0.07, 2);
+});
+
+test("the volume panel has presets and a slider for each speaker", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const now = card(page, "nowp");
+  await expect(now.locator(".vpanel")).toBeHidden();
+  await now.locator(".vmore").click();
+  await expect(now.locator(".mvol")).toHaveCount(2);
+  await expect(now.locator(".mvol").first()).toContainText("Living room");
+  await now.locator(".preset", { hasText: "Medium" }).click();
+  const done = await calls(page);
+  for (const entity_id of ["media_player.living_room", "media_player.kitchen"]) {
+    expect(done).toContainEqual(expect.objectContaining({ service: "volume_set", data: { entity_id, volume_level: 0.3 } }));
+  }
+});
+
+test("also play on adds a speaker to the group, takes one out, adds them all or splits the group", async ({ page }) => {
+  await open(page, "fixture=group");
+  const group = card(page, "group");
+  await expect(group.locator(".gchip.on")).toHaveText("Kitchen");
+  await expect(group.locator('.gchip[data-p="media_player.office"]')).toHaveClass(/na/);
+  await group.locator(".gchip", { hasText: "Bedroom" }).click();
+  await group.locator(".gchip", { hasText: "Kitchen" }).click();
+  await group.locator('.gchip[data-g="all"]').click();
+  await group.locator('[data-g="split"]').click();
+  await group.locator(".gchip", { hasText: "Office" }).click();
+  const done = (await calls(page)).filter((c) => ["join", "unjoin"].includes(c.service)).map((c) => [c.service, c.data]);
+  expect(done).toEqual([
+    ["join", { entity_id: "media_player.living_room", group_members: ["media_player.bedroom"] }],
+    ["unjoin", { entity_id: "media_player.kitchen" }],
+    ["join", { entity_id: "media_player.living_room", group_members: ["media_player.bedroom", "media_player.bathroom"] }],
+    ["unjoin", { entity_id: ["media_player.kitchen"] }],
+  ]);
+  await expect(group.locator(".toast")).toHaveText("Office · Offline");
+});
+
+test("a solo speaker is left out of also play on", async ({ page }) => {
+  await open(page, "fixture=group&solo=media_player.bathroom");
+  const group = card(page, "group");
+  await group.locator('.gchip[data-g="all"]').click();
+  expect((await calls(page)).filter((c) => c.service === "join").map((c) => c.data.group_members)).toEqual([["media_player.bedroom"]]);
+  await group.locator(".gchip", { hasText: "Bathroom" }).click();
+  await expect(group.locator(".toast")).toHaveText("Bathroom can't join a group");
+  await expect(group.locator(".ghint")).toBeHidden();
+  await open(page, "fixture=group&solo=media_player.living_room");
+  await expect(card(page, "group").locator(".ghint")).toHaveText("Living room plays alone, so no group is possible");
+});
+
+test("the speaker bar says where playback goes and opens listen on", async ({ page }) => {
+  await open(page, "fixture=app");
+  const bar = card(page, "app").locator(".devbar");
+  await expect(bar).toContainText("Playing on");
+  await expect(bar).toContainText("Living room + Kitchen");
+  await bar.click();
+  expect(await page.evaluate(() => location.hash)).toBe("#speakers");
+});
+
+test("a trending track Spotify can't return shows a retry message, not a dead end", async ({ page }) => {
+  await open(page, "fixture=app&emptysearch");
+  const app = card(page, "app");
+  await app.locator(".trow").first().click();
+  await expect(app.locator(".toast")).toHaveText("Spotify did not respond, try again later");
+});
+
+test("search shows radios under Radio, not Other", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("golden");
+  await expect(app.locator(".sres .section")).not.toHaveText(["Other"]);
+});
+
+test("when only local results come back, search says Spotify did not respond", async ({ page }) => {
+  await open(page, "fixture=app&localsearch");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("halloween");
+  await expect(app.locator(".sres .hint")).toHaveText("Spotify did not respond: local results only");
+  await expect(app.locator(".sres .section", { hasText: "Radio" })).toHaveCount(1);
+  await expect(app.locator(".sres").getByText("Halloween Radio")).toHaveCount(1);
+});
+
+test("a normal search does not show the local-only hint", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("golden");
+  await expect(app.locator(".sres")).toContainText("Golden Hour");
+  await expect(app.locator(".sres .hint")).toHaveCount(0);
+});
