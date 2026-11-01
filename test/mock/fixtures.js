@@ -89,15 +89,24 @@ const ws = {
   "bubble_card_tools/ma_queue_items": { items: queue },
   "bubble_card_tools/ma_queue_command": {},
   "auth/sign_path": ({ path }) => ({ path }),
-  "media_player/search_media": () => ORIGAMI_LOCAL_SEARCH ? { result: [
-    { media_class: "playlist", media_content_type: "music", media_content_id: "library://playlist/9", title: "Halloween party", thumbnail: cover(3), can_play: true },
-    { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a1", title: "Halloween Radio", can_play: true },
-    { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a2", title: "Halloween Hit Radio", can_play: true },
-  ] } : { result: [
-    item("artist", "The Lanterns", "library://artist/1"), item("album", "Evening Lights", "library://album/1", 1),
-    item("album", "Field Notes", "library://album/5", 4), item("track", "Golden Hour", "library://track/100", 1),
-    { media_class: "track", media_content_type: "music", media_content_id: "spotify--x://track/sn1", title: "Spooky Night", thumbnail: cover(2), can_play: true },
-  ] },
+  "media_player/search_media": ({ search_query = "" }) => {
+    if (ORIGAMI_EMPTY_SEARCH) return { result: [] };
+    if (ORIGAMI_LOCAL_SEARCH) return { result: [
+      { media_class: "playlist", media_content_type: "music", media_content_id: "library://playlist/9", title: "Halloween party", thumbnail: cover(3), can_play: true },
+      { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a1", title: "Halloween Radio", can_play: true },
+      { media_class: "music", media_content_type: "music", media_content_id: "radiobrowser://radio/a2", title: "Halloween Hit Radio", can_play: true },
+    ] };
+    const brTrack = (title, id) => ({ media_class: "track", media_content_type: "music", media_content_id: id, title, thumbnail: cover(2), can_play: true });
+    const q = search_query.toLowerCase();
+    // Trending resolves by "Artist Title": the remix comes first to check the exact-title preference
+    if (q.includes("neon avenue")) return { result: [brTrack("Kite Club - Neon Avenue (Remix)", "spotify--x://track/remix"), brTrack("Kite Club - Neon Avenue", "spotify--x://track/neon")] };
+    if (q.includes("late bloom")) return { result: [brTrack("Mira Vale - Early Bloom", "spotify--x://track/early"), brTrack("Mira Vale - Late Bloom (feat. Juno Park)", "spotify--x://track/bloom")] };
+    return { result: [
+      item("artist", "The Lanterns", "library://artist/1"), item("album", "Evening Lights", "library://album/1", 1),
+      item("album", "Field Notes", "library://album/5", 4), item("track", "Golden Hour", "library://track/100", 1),
+      brTrack("Nightjar - Spooky Night", "spotify--x://track/sn1"),
+    ] };
+  },
   "media_player/browse_media": ({ media_content_id }) => {
     if (!media_content_id) {
       return { children: ["artists", "albums", "tracks", "playlists", "radio", "podcasts", "audiobooks"].map((id) => ({

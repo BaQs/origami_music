@@ -228,9 +228,8 @@ test("trending tracks show how they moved, and a tap plays the best match from M
   await expect(rows).toHaveCount(5);
   await rows.nth(0).click();
   await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
-    data: expect.objectContaining({ media_content_id: "spotify://track/neon", enqueue: "play" }) }));
-  expect(await ws(page, "call_service")).toContainEqual(expect.objectContaining({ service: "search",
-    service_data: expect.objectContaining({ name: "Kite Club Neon Avenue" }) }));
+    data: expect.objectContaining({ media_content_id: "spotify--x://track/neon", enqueue: "play" }) }));
+  expect(await ws(page, "media_player/search_media")).toContainEqual(expect.objectContaining({ search_query: "Kite Club Neon Avenue" }));
   await app.locator('.zone[data-zone="World"]').click();
   await expect(rows).toHaveCount(3);
   await expect(app.locator(".tmore")).toHaveCount(0);
@@ -238,7 +237,7 @@ test("trending tracks show how they moved, and a tap plays the best match from M
   // A "(feat. ...)" on one side only still finds the track, over a first result with another title
   await rows.nth(1).locator(".nextb").click();
   await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
-    data: expect.objectContaining({ media_content_id: "spotify://track/bloom", enqueue: "next" }) }));
+    data: expect.objectContaining({ media_content_id: "spotify--x://track/bloom", enqueue: "next" }) }));
 });
 
 test("the heart adds the playing track to the favorites", async ({ page }) => {

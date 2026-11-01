@@ -65,18 +65,17 @@ function normName(s, loose) {
   return (loose ? n.replace(/\(.*?\)|\[.*?\]/g, " ") : n).replace(/[^a-z0-9]+/g, " ").trim();
 }
 
-// Best search result for a title and its artist. The exact title comes first, so a remix does not win over the
-// original; the loose title only after that, for a "(feat. ...)" on one side only. Else the first result.
-function pickTrack(tracks, title, artist) {
-  const A = normName(artist);
-  const list = Array.isArray(tracks) ? tracks : [];
-  const byArtist = (it) => (it?.artists ?? []).some((a) => { const n = normName(a?.name); return !!n && !!A && (A.includes(n) || n.includes(A)); });
-  for (const loose of [false, true]) {
-    const same = (it) => normName(it?.name, loose) === normName(title, loose);
-    const hit = list.find((it) => same(it) && byArtist(it)) ?? list.find(same);
-    if (hit) return hit;
-  }
-  return list[0] ?? null;
+// Best track among media-browser search results (titles are "Artist - Title", no separate artist field).
+// Exact title part first, so a remix does not win over the original; then a title substring; else the first track.
+function pickBrowseTrack(items, title, artist) {
+  const tracks = (Array.isArray(items) ? items : []).filter((x) => x?.media_class === "track" && x?.can_play && x?.media_content_id);
+  const T = normName(title), A = normName(artist);
+  const whole = (x) => normName(x.title);
+  const titlePart = (x) => { const str = String(x.title ?? ""), i = str.indexOf(" - "); return normName(i >= 0 ? str.slice(i + 3) : str); };
+  const artistOk = (x) => !A || whole(x).includes(A);
+  return tracks.find((x) => titlePart(x) === T && artistOk(x))
+      ?? tracks.find((x) => T && whole(x).includes(T) && artistOk(x))
+      ?? tracks[0] ?? null;
 }
 
 // Date of a chart: today, yesterday, or day/month
@@ -1669,15 +1668,16 @@ class OrigamiMusic extends OrigamiBase {
     if (!it || !ma) return;
     this._toast(t.looking + it.title + "…");
     try {
-      const entry = await this._entryId();
-      const search = this._hass.callWS({ type: "call_service", domain: "music_assistant", service: "search", return_response: true,
-        service_data: { config_entry_id: entry, name: it.artist + " " + it.title, media_type: ["track"], limit: 8 } });
+      // media_player/search_media is the search the Search tab uses; it returns Spotify results far more reliably
+      // than the music_assistant.search service, which often times out even when the browser search works
+      const search = this._hass.callWS({ type: "media_player/search_media", entity_id: ma, search_query: it.artist + " " + it.title });
       const timeout = new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), 12000));
       const r = await Promise.race([search, timeout]);
-      const best = pickTrack(r?.response?.tracks, it.title, it.artist);
-      // A chart hit always exists; an empty result means the Spotify provider is throttled, not that the track is missing
-      if (!best?.uri) { this._toast(t.searchSlow); return; }
-      this._play(best.uri, "music", enqueue);
+      const list = Array.isArray(r?.result) ? r.result : (r?.result?.children ?? []);
+      const best = pickBrowseTrack(list, it.title, it.artist);
+      // A chart hit always exists; no match means the Spotify provider is throttled, not that the track is missing
+      if (!best) { this._toast(t.searchSlow); return; }
+      this._play(best.media_content_id, "music", enqueue);
     } catch (e) {
       this._toast(e?.message === "timeout" ? t.searchSlow : t.err + (e?.message ?? e));
     }
