@@ -171,10 +171,10 @@ export async function show(name, params, column) {
                 trends: { France: "sensor.charts_france", World: "sensor.charts_world" } };
   if (name === "app") return add(APP);
   if (name === "app-popup") return mount("origami-music", { ...BASE, ...APP }, hass, sheet(column, "Music"));
-  if (name === "nowplaying") return add({ layout: "nowplaying", speakers_path: "#speakers" });
+  if (name === "nowplaying") return add({ layout: "nowplaying", speakers_path: "#speakers", music_path: "#music" });
   if (name === "nowplaying-popup") {
     const el = sheet(column, "Now playing");
-    await mount("origami-music", { ...BASE, layout: "nowplaying", speakers_path: "#speakers" }, hass, el);
+    await mount("origami-music", { ...BASE, layout: "nowplaying", speakers_path: "#speakers", music_path: "#music" }, hass, el);
     await mount("origami-music", { ...BASE, layout: "group" }, hass, el);
     return mount("origami-music", { ...BASE, layout: "queue", limit: 3 }, hass, el);
   }

@@ -131,7 +131,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Livres audio" },
     cls: { artist: "Artistes", album: "Albums", track: "Titres", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
-    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
+    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", goArtist: "Aller à l'artiste", seeInApp: "Voir dans Musique", shuffleplay: "Aléatoire", qRemove: "Retirer de la file", qNext: "Lire ensuite", volume: "Volume", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
     speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre", clearNext: "Vider la suite", cleared: "Suite vidée",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
@@ -156,7 +156,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Audiobooks" },
     cls: { artist: "Artists", album: "Albums", track: "Tracks", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
-    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
+    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", goArtist: "Go to artist", seeInApp: "See in Music", shuffleplay: "Shuffle", qRemove: "Remove from queue", qNext: "Play next", volume: "Volume", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
     speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track", clearNext: "Clear up next", cleared: "Up next cleared",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
@@ -470,10 +470,15 @@ class OrigamiMusic extends OrigamiBase {
     if (level.err) { out.push(this._el("div", "hint error", t.err + level.err)); return out; }
     if (!level.children.length) { out.push(this._el("div", "hint", t.nothing)); return out; }
     if (app && level.id && ["playlist", "album", "artist"].includes(level.type)) {
+      const playrow = this._el("div", "playrow");
       const all = this._el("div", "playall");
       Object.assign(all.dataset, { act: "play-now", id: level.id, type: level.type });
       all.append(this._icon("mdi:play"), this._el("span", null, t.playAll));
-      out.push(all);
+      const shuf = this._el("div", "playall ghost");
+      Object.assign(shuf.dataset, { act: "shuffle-play", id: level.id, type: level.type });
+      shuf.append(this._icon("mdi:shuffle"), this._el("span", null, t.shuffleplay));
+      playrow.append(all, shuf);
+      out.push(playrow);
     }
     if (!level.id) {
       const grid = this._el("div", "grid");
@@ -843,6 +848,7 @@ class OrigamiMusic extends OrigamiBase {
     else if (c === "fav") this._favToggle(a.media_content_id);
     else if (c === "dev") this._go(this._config.speakers_path);
     else if (c === "mix") this._mix();
+    else if (c === "seeapp") this._go(this._config.music_path);
     else if (c === "pp") this._call("media_player.media_play_pause", { entity_id: ma });
     else if (c === "prev") this._call("media_player.media_previous_track", { entity_id: ma });
     else if (c === "next") this._call("media_player.media_next_track", { entity_id: ma });
@@ -934,6 +940,8 @@ class OrigamiMusic extends OrigamiBase {
     const card = this._skel("queue", '<div class="hd"><span class="ht"></span><span class="qclear" data-act="queue-clear" hidden></span><span class="hv link"></span></div><div class="lst"></div><div class="toast"></div>',
       (ev) => {
         if (ev.target.closest('[data-act="queue-clear"]')) { this._clearUpNext(); return; }
+        const nx = ev.target.closest('[data-act="q-next"]'); if (nx) { this._queueAct("move_next", nx.dataset.id); return; }
+        const rm = ev.target.closest('[data-act="q-remove"]'); if (rm) { this._queueAct("delete_item", rm.dataset.id); return; }
         if (ev.target.closest(".link")) { this._open = !this._open; this._sig = null; this._renderQueue(); return; }
         this._onClick(ev);
       });
@@ -952,7 +960,11 @@ class OrigamiMusic extends OrigamiBase {
       const text = this._el("div", "text");
       text.append(this._el("div", "title", r.it.name ?? ""),
         this._el("div", "sub", [r.it.artists, r.it.album].filter((x) => typeof x === "string" && x)[0] ?? ""));
-      row.append(this._thumb(r.it.image, "mdi:music-note"), text, this._el("div", "dur", formatDuration(r.it.duration)));
+      const acts = this._el("div", "qa");
+      const nextb = this._el("div", "qab"); Object.assign(nextb.dataset, { act: "q-next", id: r.it.queue_item_id }); nextb.title = t.qNext; nextb.append(this._icon("mdi:arrow-up"));
+      const rmb = this._el("div", "qab"); Object.assign(rmb.dataset, { act: "q-remove", id: r.it.queue_item_id }); rmb.title = t.qRemove; rmb.append(this._icon("mdi:close"));
+      acts.append(nextb, rmb);
+      row.append(this._thumb(r.it.image, "mdi:music-note"), text, acts);
       return row;
     }));
   }
@@ -1333,7 +1345,7 @@ class OrigamiMusic extends OrigamiBase {
     if (!this.shadowRoot || !this._ctx) return;
     const t = this._t();
     if (!["home", "search", "lib"].includes(this._tab)) this._tab = "home";
-    const card = this._skel("app", '<div class="tabs2"></div><div class="devbar" hidden></div><div class="pane"></div><div class="mini" hidden></div><div class="toast"></div>',
+    const card = this._skel("app", '<div class="tabs2"></div><div class="devbar" hidden></div><div class="pane"></div><div class="homevol" hidden></div><div class="mini" hidden></div><div class="toast"></div>',
       (ev) => this._appClick(ev));
     if (!card._wired) {
       card._wired = true;
@@ -1343,6 +1355,7 @@ class OrigamiMusic extends OrigamiBase {
     for (const c of card.querySelectorAll(".tab2")) c.classList.toggle("on", c.dataset.tab === this._tab);
     this._renderDevbar(card.querySelector(".devbar"));
     this._renderMini(card.querySelector(".mini"));
+    this._renderHomeVol(card.querySelector(".homevol"));
     const pane = card.querySelector(".pane");
     if (this._stack.length) {
       const level = this._stack[this._stack.length - 1];
@@ -1444,11 +1457,15 @@ class OrigamiMusic extends OrigamiBase {
         rank.append(this._el("b", null, String(r.rank)), this._el("i", "move-" + (r.move || "none"), move));
         const text = this._el("div", "text");
         text.append(this._el("div", "title", r.title ?? ""), this._el("div", "sub", r.artist ?? ""));
+        const add = this._el("div", "nextb");
+        Object.assign(add.dataset, { act: "trend-add", i: String(i) });
+        add.title = t.addQueue;
+        add.append(this._icon("mdi:playlist-plus"));
         const next = this._el("div", "nextb");
         Object.assign(next.dataset, { act: "trend-next", i: String(i) });
         next.title = t.next;
         next.append(this._icon("mdi:playlist-play"));
-        row.append(rank, this._thumb(r.image, "mdi:music-note"), text, next);
+        row.append(rank, this._thumb(r.image, "mdi:music-note"), text, add, next);
         return row;
       }));
       // The switch between the top 5 and the whole chart is a button under the list, easier to see than a link
@@ -1678,6 +1695,52 @@ class OrigamiMusic extends OrigamiBase {
     });
   }
 
+  // Go to the current track's artist: resolve the name via the browser search, then open it in the app's browse stack
+  async _goToArtist(name) {
+    const ma = this._ctx?.ma, t = this._t();
+    if (!ma || !name) return;
+    this._toast(t.looking + name + "…");
+    try {
+      const r = await this._hass.callWS({ type: "media_player/search_media", entity_id: ma, search_query: name });
+      const list = Array.isArray(r?.result) ? r.result : (r?.result?.children ?? []);
+      const arts = list.filter((x) => x?.media_class === "artist" && x?.can_expand && x?.media_content_id);
+      const target = arts.find((x) => normName(x.title) === normName(name)) ?? arts[0];
+      if (!target) { this._toast(t.notFound + name); return; }
+      this._stack = [];
+      this._browse(target.media_content_id, target.media_content_type, target.title ?? name);
+    } catch (e) { this._toast(t.err + (e?.message ?? e)); }
+  }
+
+  // One queue mutation addressed by item_id (remove, play next); guard against a second tap before the re-read
+  _queueAct(cmd, id) {
+    if (this._qbusy || !this._m.qid || !id) return;
+    this._qbusy = true;
+    this._hass.callWS({ type: "bubble_card_tools/ma_queue_command", queue_id: this._m.qid, command: cmd, item_id: id })
+      .then(() => { this._m.at = 0; })
+      .catch((e) => this._toast(this._t().err + (e?.message ?? e)))
+      .finally(() => { this._qbusy = false; this._sig = null; this._update(); });
+  }
+
+  // Quick group volume under the mini-player: the same step logic and presets as the player, no per-speaker sliders
+  _renderHomeVol(box) {
+    const t = this._t();
+    box.hidden = !this._homeVolOpen || !this._ctx?.ma;
+    if (box.hidden) return;
+    if (!box._wired) {
+      box._wired = true;
+      box.innerHTML = '<div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div><div class="presets"></div>';
+      this._wireVolume(box.querySelector(".vol"), (v) => this._groupVolume(v));
+      const presets = this._config.presets ?? [0.15, 0.3, 0.5];
+      box.querySelector(".presets").replaceChildren(...[t.quiet, t.medium, t.loud].map((label, i) => { const b = this._el("div", "preset", label); b.dataset.preset = String(presets[i]); return b; }));
+    }
+    const S = this._hass.states, players = this._groupPlayers();
+    const levels = players.map((p) => S[p]?.attributes?.volume_level ?? 0);
+    const vol = box.querySelector(".vol");
+    vol._label = players.length > 1 ? t.group : "";
+    this._setIcon(box.querySelector(".vic"), "mdi:volume-high");
+    if (!vol._drag && vol._local == null) this._paintVol(vol, levels.reduce((x, y) => x + y, 0) / (levels.length || 1));
+  }
+
   // Mini player docked at the bottom of the pop-up: a tap opens the player, the heart likes the track
   _renderMini(mini) {
     const t = this._t(), { ma, st } = this._ctx, a = st?.attributes ?? {};
@@ -1691,11 +1754,16 @@ class OrigamiMusic extends OrigamiBase {
       const art = this._el("div", "art");
       this._art(art, pic, "mdi:music");
       const text = this._el("div", "titles");
-      text.append(this._el("div", "name", a.media_title), this._el("div", "status", [a.media_artist, group].filter(Boolean).join(" · ")));
+      const sub = this._el("div", "status");
+      if (a.media_artist) { const ar = this._el("span", "goart", a.media_artist); ar.dataset.act = "go-artist"; ar.dataset.name = a.media_artist; ar.title = t.goArtist; sub.append(ar); }
+      if (group) sub.append(document.createTextNode((a.media_artist ? " · " : "") + group));
+      text.append(this._el("div", "name", a.media_title), sub);
+      const vol = this._el("div", "minibtn"); vol.dataset.act = "home-vol"; vol.title = t.volume; vol.classList.toggle("on", !!this._homeVolOpen); vol.append(this._icon("mdi:tune-vertical"));
+      const next = this._el("div", "minibtn"); next.dataset.act = "mini-next"; next.title = t.next; next.append(this._icon("mdi:skip-next"));
       const pp = this._el("div", "pp");
       pp.dataset.act = "mini-pp";
       pp.append(this._icon(st.state === "playing" ? "mdi:pause" : "mdi:play"));
-      mini.replaceChildren(art, text, this._heart(a.media_content_id), pp);
+      mini.replaceChildren(art, text, this._heart(a.media_content_id), vol, next, pp);
       mini.dataset.act = "mini";
       mini.title = t.inplay;
     });
@@ -1705,6 +1773,8 @@ class OrigamiMusic extends OrigamiBase {
     const t = this._t(), cfg = this._config;
     const tab = ev.target.closest(".tab2");
     if (tab) { this._switchTab(tab.dataset.tab); return; }
+    const preset = ev.target.closest("[data-preset]");
+    if (preset) { this._groupVolume(Number(preset.dataset.preset), true); return; }
     const el = ev.target.closest("[data-act]");
     if (!el) return;
     const d = el.dataset, ma = this._ctx?.ma;
@@ -1718,6 +1788,11 @@ class OrigamiMusic extends OrigamiBase {
     else if (d.act === "top") { this._topOpen = !this._topOpen; this._renderApp(); }
     else if (d.act === "trend-play") this._playTrend(Number(d.i), "play");
     else if (d.act === "trend-next") this._playTrend(Number(d.i), "next");
+    else if (d.act === "trend-add") this._playTrend(Number(d.i), "add");
+    else if (d.act === "mini-next") { if (ma) this._call("media_player.media_next_track", { entity_id: ma }); }
+    else if (d.act === "home-vol") { this._homeVolOpen = !this._homeVolOpen; this._renderApp(); }
+    else if (d.act === "go-artist") this._goToArtist(d.name);
+    else if (d.act === "shuffle-play") { if (ma) this._call("media_player.shuffle_set", { entity_id: ma, shuffle: true }); this._play(d.id, d.type, "replace"); }
     else if (d.act === "fav-play") {
       // The tapped track and the favorites after it, like a playlist
       const uris = (window.__origamiMusicLists?.favs?.items ?? []).slice(Number(d.i)).map((x) => x.uri).filter(Boolean);
@@ -1782,6 +1857,7 @@ class OrigamiMusic extends OrigamiBase {
       + '<div class="c" data-c="next"></div><div class="c" data-c="repeat"></div></div>'
       + '<div class="devrow"><div class="dev" data-c="dev"><ha-icon icon="mdi:speaker"></ha-icon><span></span></div><span class="devn"></span>'
       + '<div class="mixb" data-c="mix" hidden></div><div class="more" data-c="more"></div></div>'
+      + '<div class="seeapp" data-c="seeapp" hidden></div>'
       + '<div class="vrow"><div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div>'
       + '<div class="vmore" data-c="vmore"></div></div><div class="vpanel" hidden><div class="presets"></div><div class="mvols"></div></div>'
       + '<div class="toast"></div>',
@@ -1808,6 +1884,9 @@ class OrigamiMusic extends OrigamiBase {
     mixb.hidden = !(known && typeof uri === "string" && !/^radiobrowser/.test(uri));
     this._setIcon(mixb, "mdi:radio-tower");
     mixb.title = t.mix;
+    const seeapp = card.querySelector(".seeapp");
+    seeapp.hidden = !this._config.music_path;
+    if (!seeapp.firstChild) seeapp.append(this._icon("mdi:magnify"), this._el("span", null, t.seeInApp));
     this._setIcon(card.querySelector('[data-c="more"]'), "mdi:dots-horizontal");
     const sh = card.querySelector('[data-c="shuffle"]');
     this._setIcon(sh, a.shuffle ? "mdi:shuffle" : "mdi:shuffle-disabled");
@@ -2030,6 +2109,10 @@ const ORIGAMI_MUSIC_CSS = `
   .qclear:active { opacity: 0.6; }
   ha-card.queue .lst { border-radius: 26px; background: var(--fill-subtle, #eae8e4); padding: 8px; display: flex; flex-direction: column; }
   ha-card.queue .row { padding: 8px; min-height: 0; }
+  .qa { flex: none; display: flex; gap: 2px; }
+  .qab { width: 34px; height: 34px; border-radius: 11px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--secondary-text-color); --mdc-icon-size: 18px; }
+  .qab:active { transform: scale(0.9); background: var(--ha-card-background, #fff); }
   ha-card.queue .thumb { width: 48px; height: 48px; border-radius: 14px; background: var(--ha-card-background, #fff); box-shadow: 0 2px 6px rgba(74, 70, 64, 0.08); }
   ha-card.queue .title { font-size: 15px; }
   ha-card.queue .sub, ha-card.queue .dur { font-size: 13px; font-weight: 600; }
@@ -2147,6 +2230,17 @@ const ORIGAMI_MUSIC_CSS = `
   .mini .name { font-size: 15px; }
   .mini .status { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
   .mini .pp { width: 44px; height: 44px; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
+  .minibtn { flex: none; width: 36px; height: 36px; border-radius: 12px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    color: var(--primary-text-color); --mdc-icon-size: 22px; }
+  .minibtn.on { background: var(--fill-subtle, #eae8e4); }
+  .minibtn:active { transform: scale(0.9); }
+  .goart { cursor: pointer; }
+  .goart:active { opacity: 0.6; }
+  .homevol { position: sticky; bottom: var(--origami-music-mini-bottom, 12px); z-index: 2; display: flex; flex-direction: column; gap: 10px;
+    padding: 12px; margin-bottom: -4px; border-radius: 22px; background: var(--ha-card-background, #fff); box-shadow: 0 8px 22px rgba(74, 70, 64, 0.16); }
+  .homevol[hidden] { display: none; }
+  .homevol .vol { height: 44px; border-radius: 15px; }
+  .homevol .presets { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
   .heart { flex: none; width: 40px; height: 40px; border-radius: 13px; display: flex; align-items: center; justify-content: center;
     color: var(--secondary-text-color); --mdc-icon-size: 22px; cursor: pointer; -webkit-tap-highlight-color: transparent; }
   .heart.on { color: #c9785c; }
@@ -2182,6 +2276,8 @@ const ORIGAMI_MUSIC_CSS = `
     color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); }
   .sortb { align-self: flex-start; height: 32px; display: flex; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; font-weight: 700;
     color: var(--primary-text-color); --mdc-icon-size: 18px; }
+  .playrow { display: flex; gap: 8px; margin-bottom: 4px; }
+  .playall.ghost { background: none; border: 1.5px solid color-mix(in srgb, var(--primary-text-color, #4a4640) 22%, transparent); color: var(--primary-text-color); }
   .playall { align-self: flex-start; display: flex; align-items: center; gap: 8px; height: 44px; box-sizing: border-box; padding: 0 18px 0 14px;
     border-radius: 999px; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); font-size: 15px; font-weight: 700;
     cursor: pointer; --mdc-icon-size: 22px; margin-bottom: 4px; }
@@ -2198,6 +2294,10 @@ const ORIGAMI_MUSIC_CSS = `
   .heart.big { width: 48px; height: 48px; border-radius: 16px; background: var(--fill-subtle, #eae8e4); --mdc-icon-size: 26px; }
   .heart.big.on { background: color-mix(in srgb, #c9785c 18%, var(--ha-card-background, #fff)); }
   .devrow { display: flex; align-items: center; gap: 12px; }
+  .seeapp { display: inline-flex; align-self: flex-start; align-items: center; gap: 6px; cursor: pointer; font-size: 14px; font-weight: 700;
+    color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); --mdc-icon-size: 18px; }
+  .seeapp[hidden] { display: none; }
+  .seeapp:active { opacity: 0.6; }
   .dev { min-width: 0; height: 44px; box-sizing: border-box; padding: 0 16px 0 12px; border-radius: 999px; display: flex; align-items: center; gap: 8px;
     background: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 18%, var(--ha-card-background, #fff));
     color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); font-size: 14px; font-weight: 700; cursor: pointer; --mdc-icon-size: 18px; }

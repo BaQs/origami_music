@@ -235,7 +235,7 @@ test("trending tracks show how they moved, and a tap plays the best match from M
   await expect(app.locator(".tmore")).toHaveCount(0);
   await expect(rows.nth(0)).toContainText("Static");
   // A "(feat. ...)" on one side only still finds the track, over a first result with another title
-  await rows.nth(1).locator(".nextb").click();
+  await rows.nth(1).locator('[data-act="trend-next"]').click();
   await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
     data: expect.objectContaining({ media_content_id: "spotify--x://track/bloom", enqueue: "next" }) }));
 });
@@ -285,7 +285,7 @@ test("the library tab filters the library and opens the liked songs with Play al
   await app.locator('.chip[data-k="album"]').click();
   await app.locator(".lrow", { hasText: "Liked songs" }).click();
   await expect(app.locator(".back")).toContainText("Liked songs");
-  await app.locator(".playall").click();
+  await app.locator('.playall[data-act="play-now"]').click();
   expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
     data: expect.objectContaining({ media_content_id: "builtin://playlist/all_favorite_tracks", enqueue: "replace" }) }));
   await app.locator(".back").click();
@@ -483,4 +483,64 @@ test("Move playback transfers the queue to another speaker and follows it", asyn
     data: { entity_id: "media_player.bedroom", source_player: "media_player.living_room", auto_play: true } }));
   expect(done).toContainEqual(expect.objectContaining({ service: "select_option",
     data: { entity_id: "input_select.speaker", option: "media_player.bedroom_speaker" } }));
+});
+
+test("a trending track can be added to the queue", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator(".trow").first().locator('[data-act="trend-add"]').click();
+  await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "spotify--x://track/neon", enqueue: "add" }) }));
+});
+
+test("the mini player skips to the next track", async ({ page }) => {
+  await open(page, "fixture=app");
+  await card(page, "app").locator('.mini [data-act="mini-next"]').click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "media_next_track", data: { entity_id: "media_player.living_room" } }));
+});
+
+test("the mini artist opens the artist in the library", async ({ page }) => {
+  await open(page, "fixture=app");
+  await card(page, "app").locator('.mini [data-act="go-artist"]').click();
+  await expect.poll(() => ws(page, "media_player/browse_media")).toContainEqual(expect.objectContaining({ media_content_id: "library://artist/1" }));
+});
+
+test("the home volume unfolds and a preset sets every speaker", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await expect(app.locator(".homevol")).toBeHidden();
+  await app.locator('.mini [data-act="home-vol"]').click();
+  await app.locator(".homevol .preset", { hasText: "Medium" }).click();
+  const set = (await calls(page)).filter((c) => c.service === "volume_set");
+  expect(set.map((c) => c.data.entity_id).sort()).toEqual(["media_player.kitchen", "media_player.living_room"]);
+  for (const c of set) expect(c.data.volume_level).toBe(0.3);
+});
+
+test("opening a collection offers Shuffle, which shuffles then plays", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="lib"]').click();
+  await app.locator('.chip[data-k="album"]').click();
+  await app.locator(".lrow", { hasText: "Evening Lights" }).click();
+  await app.locator(".playall.ghost").click();
+  const done = (await calls(page)).filter((c) => ["shuffle_set", "play_media"].includes(c.service));
+  expect(done[0]).toEqual(expect.objectContaining({ service: "shuffle_set", data: expect.objectContaining({ shuffle: true }) }));
+  expect(done.some((c) => c.service === "play_media" && c.data.media_content_id === "library://album/1")).toBe(true);
+});
+
+test("a queue track can be removed and moved to play next", async ({ page }) => {
+  await open(page, "fixture=queue");
+  const q = card(page, "queue");
+  await q.locator(".row", { hasText: "Paper Boats" }).locator('[data-act="q-remove"]').click();
+  expect(await ws(page, "bubble_card_tools/ma_queue_command")).toContainEqual(expect.objectContaining({ command: "delete_item", item_id: "q2" }));
+  await open(page, "fixture=queue");
+  const q2 = card(page, "queue");
+  await q2.locator(".row", { hasText: "Northern Line" }).locator('[data-act="q-next"]').click();
+  expect(await ws(page, "bubble_card_tools/ma_queue_command")).toContainEqual(expect.objectContaining({ command: "move_next", item_id: "q3" }));
+});
+
+test("See in Music navigates from the player to the music pop-up", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  await card(page, "nowp").locator('[data-c="seeapp"]').click();
+  expect(await page.evaluate(() => location.hash)).toBe("#music");
 });

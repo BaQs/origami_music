@@ -227,6 +227,7 @@ template:
 | `player_path`, `speakers_path` | | `app`, `nowplaying`: opened by the mini player and by the speakers chip |
 | `ma_path` | | `app`: a link to Music Assistant at the end of the library |
 | `presets` | `[0.15, 0.3, 0.5]` | `nowplaying`: the volumes of the Quiet, Medium and Loud presets |
+| `music_path` | | `nowplaying`: a See in Music link that opens the `app` pop-up |
 | `config_entry_id` | | The Music Assistant entry, when there is more than one |
 
 </details>
@@ -236,7 +237,7 @@ template:
 
 <br>
 
-The banner, the shelf and the library read the albums and playlists played last with the `music_assistant.get_library` action, once every 10 minutes for all the cards of a page. The library and the search use the media browser of Home Assistant. The queue comes from Bubble Card Tools, which reads the Music Assistant queue and also signs cover images, so that an http image shows on an https dashboard. Every player of a Music Assistant group reports the same members, and the first one leads the group. The heart reads and sets favorites with Bubble Card Tools (tracks, radios, playlists, albums and artists), which adds an item to the Music Assistant library when needed. The progress bar seeks on release, Mix starts a radio-mode queue from the current track, and the library rows add to the queue. The texts follow the language of Home Assistant, in English or French.
+The banner, the shelf and the library read the albums and playlists played last with the `music_assistant.get_library` action, once every 10 minutes for all the cards of a page. The library and the search use the media browser of Home Assistant. The queue comes from Bubble Card Tools, which reads the Music Assistant queue and also signs cover images, so that an http image shows on an https dashboard. Every player of a Music Assistant group reports the same members, and the first one leads the group. The heart reads and sets favorites with Bubble Card Tools (tracks, radios, playlists, albums and artists), which adds an item to the Music Assistant library when needed. The progress bar seeks on release, Mix starts a radio-mode queue from the current track, and the library rows add to the queue. The mini player skips tracks, opens the current artist and unfolds a quick group volume; queue rows remove a track or move it to play next; opening a playlist or album offers Shuffle. The texts follow the language of Home Assistant, in English or French.
 
 </details>
 
