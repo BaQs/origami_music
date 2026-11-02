@@ -30,7 +30,7 @@ library.track = TRACKS.slice(1).map(([name, artist, , n], i) => ({ media_type: "
                                                                  artists: [{ name: artist }] }));
 library.artist = [["The Lanterns", 1], ["Mira Vale", 2], ["Odd Harbour", 3], ["Juno Park", 5]].map(([name, n], i) => ({ media_type: "artist",
   uri: `library://artist/${i + 1}`, name, image: cover(n) }));
-library.podcast = [];
+library.podcast = [["Batman Autopsie", 3], ["Dans mon siege auto", 5]].map(([name, n], i) => ({ media_type: "podcast", uri: `library://podcast/${i + 1}`, name, image: cover(n) }));
 library.audiobook = [];
 
 // Two made-up charts as a chart sensor reports them: tracks in order, and the order of the previous chart

@@ -1559,7 +1559,8 @@ class OrigamiMusic extends OrigamiBase {
       else out.push(...items.map((it) => {
         const row = this._el("div", "row item lrow");
         const type = it.media_type;
-        if (["radio", "track"].includes(type)) Object.assign(row.dataset, { act: "play-now", id: it.uri, type: "music" });
+        // Music Assistant exposes radios, podcasts and audiobooks as playable, not browsable (browse_media rejects them)
+        if (["radio", "track", "podcast", "audiobook"].includes(type)) Object.assign(row.dataset, { act: "play-now", id: it.uri, type: "music" });
         else Object.assign(row.dataset, { act: "open", id: it.uri, type, title: it.name ?? "" });
         const thumb = this._thumb(it.image, ORIGAMI_MUSIC_ICONS[type] ?? "mdi:music");
         if (type === "artist") thumb.classList.add("round");

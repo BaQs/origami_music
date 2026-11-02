@@ -412,3 +412,16 @@ test("a normal search does not show the local-only hint", async ({ page }) => {
   await expect(app.locator(".sres")).toContainText("Golden Hour");
   await expect(app.locator(".sres .hint")).toHaveCount(0);
 });
+
+test("in the library, a podcast plays instead of trying to open (Music Assistant rejects browsing it)", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="lib"]').click();
+  await app.locator('.chip[data-k="podcast"]').click();
+  const row = app.locator(".lrow", { hasText: "Batman Autopsie" });
+  await expect(row).toHaveCount(1);
+  await row.click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "library://podcast/1", enqueue: "replace" }) }));
+  expect(await ws(page, "media_player/browse_media")).not.toContainEqual(expect.objectContaining({ media_content_id: "library://podcast/1" }));
+});
