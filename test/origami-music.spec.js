@@ -436,3 +436,51 @@ test("Clear up next removes the upcoming tracks without stopping the current one
   expect(cmds).not.toContainEqual(expect.objectContaining({ command: "clear" }));
   await expect(q.locator(".toast")).toHaveText("Up next cleared");
 });
+
+test("the library lets you favorite an album", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="lib"]').click();
+  await app.locator('.chip[data-k="album"]').click();
+  await app.locator(".lrow", { hasText: "Evening Lights" }).locator(".heart").click();
+  expect(await ws(page, "bubble_card_tools/ma_favorite_set")).toContainEqual(expect.objectContaining({ uri: "library://album/1", favorite: true }));
+});
+
+test("the library adds an album to the queue", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="lib"]').click();
+  await app.locator('.chip[data-k="album"]').click();
+  await app.locator(".lrow", { hasText: "Evening Lights" }).locator(".qadd").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ media_content_id: "library://album/1", enqueue: "add" }) }));
+  await expect(app.locator(".toast")).toContainText("Added to the queue of");
+});
+
+test("the progress bar seeks within the track", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  await card(page, "nowp").locator(".prog").click();
+  await expect.poll(() => calls(page)).toContainEqual(expect.objectContaining({ service: "media_seek",
+    data: expect.objectContaining({ entity_id: "media_player.living_room", seek_position: 107 }) }));
+});
+
+test("Mix starts a radio-mode queue from the current track", async ({ page }) => {
+  await open(page, "fixture=nowplaying");
+  const now = card(page, "nowp");
+  await expect(now.locator(".mixb")).toBeVisible();
+  await now.locator(".mixb").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ domain: "music_assistant", service: "play_media",
+    data: expect.objectContaining({ media_id: "library://track/100", radio_mode: true, enqueue: "replace" }) }));
+});
+
+test("Move playback transfers the queue to another speaker and follows it", async ({ page }) => {
+  await open(page, "fixture=group");
+  const g = card(page, "group");
+  await g.locator(".gmove").click();
+  await g.locator(".gchip", { hasText: "Bedroom" }).click();
+  const done = await calls(page);
+  expect(done).toContainEqual(expect.objectContaining({ domain: "music_assistant", service: "transfer_queue",
+    data: { entity_id: "media_player.bedroom", source_player: "media_player.living_room", auto_play: true } }));
+  expect(done).toContainEqual(expect.objectContaining({ service: "select_option",
+    data: { entity_id: "input_select.speaker", option: "media_player.bedroom_speaker" } }));
+});

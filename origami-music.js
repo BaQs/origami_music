@@ -131,7 +131,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Livres audio" },
     cls: { artist: "Artistes", album: "Albums", track: "Titres", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
-    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
+    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
     speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre", clearNext: "Vider la suite", cleared: "Suite vidée",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
@@ -156,7 +156,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Audiobooks" },
     cls: { artist: "Artists", album: "Albums", track: "Tracks", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
-    sent: "Sent to ", playnext: "Will play next on ", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
+    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
     speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track", clearNext: "Clear up next", cleared: "Up next cleared",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
@@ -320,7 +320,8 @@ class OrigamiMusic extends OrigamiBase {
     if (!ma || !id) return;
     this._hass.callService("media_player", "play_media", { entity_id: ma, media_content_id: id, media_content_type: type ?? "music", enqueue })
       .then(() => {
-        this._toast((enqueue === "next" ? this._t().playnext : this._t().sent) + (this._names()[ma] ?? this._ctx.st?.attributes?.friendly_name ?? ma));
+        const t = this._t();
+        this._toast((enqueue === "next" ? t.playnext : enqueue === "add" ? t.queued : t.sent) + (this._names()[ma] ?? this._ctx.st?.attributes?.friendly_name ?? ma));
         this._m.at = 0;
       })
       .catch((e) => this._toast(this._t().err + (e?.message ?? e)));
@@ -758,8 +759,9 @@ class OrigamiMusic extends OrigamiBase {
     pos = Math.max(0, dur ? Math.min(pos, dur) : pos);
     const live = ["playing", "paused", "buffering"].includes(st?.state);
     card.querySelector(".prog").hidden = !live || !dur;
-    card.querySelector(".bar i").style.width = dur ? (pos / dur * 100).toFixed(2) + "%" : "0%";
-    card.querySelector(".pos").textContent = formatDuration(pos) || "0:00";
+    const frac = this._seekLocal != null ? this._seekLocal : (dur ? pos / dur : 0);
+    card.querySelector(".bar i").style.width = (frac * 100).toFixed(2) + "%";
+    card.querySelector(".pos").textContent = formatDuration(this._seekLocal != null ? this._seekLocal * dur : pos) || "0:00";
     card.querySelector(".dur").textContent = formatDuration(dur);
   }
 
@@ -792,6 +794,47 @@ class OrigamiMusic extends OrigamiBase {
     vol.addEventListener("pointercancel", release);
   }
 
+  // Scrub the progress bar: paint while dragging, send one media_seek on release (MA seek is expensive), then
+  // hold the local position ~2 s so _tick does not snap back to the stale media_position.
+  _wireSeek(prog) {
+    const bar = prog.querySelector(".bar");
+    const dur = () => Number(this._ctx?.st?.attributes?.media_duration) || 0;
+    const frac = (ev) => { const r = bar.getBoundingClientRect(); return Math.max(0, Math.min(1, (ev.clientX - r.left) / r.width)); };
+    const paint = (f) => { bar.querySelector("i").style.width = (f * 100).toFixed(2) + "%"; prog.querySelector(".pos").textContent = formatDuration(f * dur()) || "0:00"; };
+    prog.addEventListener("pointerdown", (ev) => { if (!dur()) return; prog.setPointerCapture?.(ev.pointerId); prog._drag = true; this._seekLocal = frac(ev); paint(this._seekLocal); });
+    prog.addEventListener("pointermove", (ev) => { if (prog._drag) { this._seekLocal = frac(ev); paint(this._seekLocal); } });
+    const end = (ev) => {
+      if (!prog._drag) return;
+      prog._drag = false;
+      const ma = this._ctx?.ma, d = dur(), f = this._seekLocal ?? frac(ev);
+      if (ma && d) this._call("media_player.media_seek", { entity_id: ma, seek_position: Math.round(f * d) });
+      clearTimeout(this._seekFree); this._seekFree = setTimeout(() => { this._seekLocal = null; }, 2000);
+    };
+    prog.addEventListener("pointerup", end);
+    prog.addEventListener("pointercancel", end);
+  }
+
+  _mix() {
+    const ma = this._ctx?.ma, a = this._ctx?.st?.attributes ?? {}, t = this._t(), id = a.media_content_id;
+    if (!ma || !id || /^radiobrowser/.test(id)) return;
+    this._hass.callService("music_assistant", "play_media", { entity_id: ma, media_id: id, radio_mode: true, enqueue: "replace" })
+      .then(() => this._toast(t.mixOn)).catch((e) => this._toast(t.err + (e?.message ?? e)));
+  }
+
+  // Move what is playing to another speaker (not grouping): transfer the queue there and follow it in the UI
+  _transfer(p) {
+    const t = this._t(), ma = this._ctx?.ma;
+    if (!ma || !p) return;
+    this._hass.callService("music_assistant", "transfer_queue", { entity_id: p, source_player: ma, auto_play: true })
+      .then(() => {
+        this._toast(t.moved);
+        const cast = Object.entries(this._config.players ?? {}).find(([, pl]) => pl === p)?.[0];
+        if (cast && this._config.select) this._call("input_select.select_option", { entity_id: this._config.select, option: cast });
+      })
+      .catch((e) => this._toast(t.err + (e?.message ?? e)))
+      .finally(() => { this._moveMode = false; this._sig = null; this._update(); });
+  }
+
   _playerClick(ev) {
     const c = ev.target.closest("[data-c]")?.dataset.c;
     const ma = this._ctx?.ma, a = this._ctx?.st?.attributes ?? {};
@@ -799,6 +842,7 @@ class OrigamiMusic extends OrigamiBase {
     if (c === "more") this.dispatchEvent(new CustomEvent("hass-more-info", { bubbles: true, composed: true, detail: { entityId: ma } }));
     else if (c === "fav") this._favToggle(a.media_content_id);
     else if (c === "dev") this._go(this._config.speakers_path);
+    else if (c === "mix") this._mix();
     else if (c === "pp") this._call("media_player.media_play_pause", { entity_id: ma });
     else if (c === "prev") this._call("media_player.media_previous_track", { entity_id: ma });
     else if (c === "next") this._call("media_player.media_next_track", { entity_id: ma });
@@ -1233,11 +1277,11 @@ class OrigamiMusic extends OrigamiBase {
   _renderGroup() {
     if (!this.shadowRoot || !this._ctx) return;
     const t = this._t(), g = this._groupState();
-    const sig = "group|" + g.leader + "|" + JSON.stringify(g.chips);
+    const sig = "group|" + g.leader + "|" + (this._moveMode ? "move" : "") + "|" + JSON.stringify(g.chips);
     if (sig === this._sig) return;
     this._sig = sig;
     const card = this._skel("group", '<div class="hd"><span class="ht"></span><span class="hv lien" data-g="split"></span></div>'
-      + '<div class="ghint"></div><div class="ggrid"></div><div class="toast"></div>', (ev) => this._groupClick(ev));
+      + '<div class="ghint"></div><div class="ggrid"></div><div class="gmove" data-g="movemode" hidden></div><div class="toast"></div>', (ev) => this._groupClick(ev));
     card.querySelector(".ht").textContent = t.alsoOn;
     // A speaker that plays alone cannot lead a group: say so, instead of a grid that only answers to a tap
     const hint = card.querySelector(".ghint");
@@ -1252,15 +1296,27 @@ class OrigamiMusic extends OrigamiBase {
       c.append(this._icon(icon), this._el("span", null, text));
       return c;
     };
+    card.classList.toggle("moving", !!this._moveMode);
     card.querySelector(".ggrid").replaceChildren(
       ...g.chips.map((c) => chip((c.on ? "on" : "") + (c.na ? " na" : ""), "mdi:speaker", c.name, { p: c.p })),
       chip("all" + (g.free.length ? "" : " na"), "mdi:speaker-multiple", t.allSpeakers, { g: "all" }));
+    const gmove = card.querySelector(".gmove");
+    gmove.hidden = !g.chips.some((c) => !c.off);
+    gmove.classList.toggle("on", !!this._moveMode);
+    gmove.replaceChildren(this._icon("mdi:swap-horizontal"), this._el("span", null, t.moveHere));
   }
 
   _groupClick(ev) {
     const t = this._t(), g = this._groupState(), names = this._names();
     const action = ev.target.closest("[data-g]")?.dataset.g, p = ev.target.closest(".gchip[data-p]")?.dataset.p;
     if (!g.leader) return;
+    if (action === "movemode") { this._moveMode = !this._moveMode; this._sig = null; this._renderGroup(); return; }
+    if (this._moveMode) {
+      const c = g.chips.find((x) => x.p === p);
+      if (c && !c.off) this._transfer(p);
+      else if (c) this._toast((names[p] ?? p) + " · " + t.offline);
+      return;
+    }
     if (action === "split") { if (g.members.length) this._call("media_player.unjoin", { entity_id: g.members }); return; }
     if (action === "all") { if (g.free.length) this._call("media_player.join", { entity_id: g.leader, group_members: g.free }); return; }
     const c = g.chips.find((x) => x.p === p);
@@ -1585,7 +1641,15 @@ class OrigamiMusic extends OrigamiBase {
         const text = this._el("div", "text");
         text.append(this._el("div", "title", it.name ?? ""), this._el("div", "sub", [t.kind[type], who].filter(Boolean).join(" · ")));
         row.append(thumb, text);
-        if (type === "radio") row.append(this._heart(it.uri));
+        // Add to queue on the things you can queue (not artists, not radios); heart on everything the server allows
+        if (["playlist", "album", "track", "podcast", "audiobook"].includes(type)) {
+          const add = this._el("div", "qadd");
+          Object.assign(add.dataset, { act: "queue-add", id: it.uri });
+          add.title = t.addQueue;
+          add.append(this._icon("mdi:playlist-plus"));
+          row.append(add);
+        }
+        row.append(this._heart(it.uri));
         return row;
       }));
       if (cfg.ma_path) {
@@ -1649,6 +1713,7 @@ class OrigamiMusic extends OrigamiBase {
     else if (d.act === "mini-pp") { if (ma) this._call("media_player.media_play_pause", { entity_id: ma }); }
     else if (d.act === "resume") { if (ma) this._call("media_player.media_play", { entity_id: ma }); }
     else if (d.act === "fav-toggle") this._favToggle(d.id);
+    else if (d.act === "queue-add") this._play(d.id, "music", "add");
     else if (d.act === "zone") { this._zone = d.zone; this._renderApp(); }
     else if (d.act === "top") { this._topOpen = !this._topOpen; this._renderApp(); }
     else if (d.act === "trend-play") this._playTrend(Number(d.i), "play");
@@ -1716,7 +1781,7 @@ class OrigamiMusic extends OrigamiBase {
       + '<div class="ctrls"><div class="c" data-c="shuffle"></div><div class="c" data-c="prev"></div><div class="c big" data-c="pp"></div>'
       + '<div class="c" data-c="next"></div><div class="c" data-c="repeat"></div></div>'
       + '<div class="devrow"><div class="dev" data-c="dev"><ha-icon icon="mdi:speaker"></ha-icon><span></span></div><span class="devn"></span>'
-      + '<div class="more" data-c="more"></div></div>'
+      + '<div class="mixb" data-c="mix" hidden></div><div class="more" data-c="more"></div></div>'
       + '<div class="vrow"><div class="vol"><i class="vfill"></i><i class="vknob"></i><span class="vic"></span><span class="vpct"></span></div>'
       + '<div class="vmore" data-c="vmore"></div></div><div class="vpanel" hidden><div class="presets"></div><div class="mvols"></div></div>'
       + '<div class="toast"></div>',
@@ -1729,6 +1794,7 @@ class OrigamiMusic extends OrigamiBase {
         this._playerClick(ev);
       });
     if (!card._vol) { card._vol = true; this._wireVolume(card.querySelector(".vrow .vol"), (v) => this._groupVolume(v)); }
+    if (!card._seek) { card._seek = true; this._wireSeek(card.querySelector(".prog")); }
     const group = this._groupNames();
     card.querySelector(".name").textContent = !ma ? t.nosel : known ? (a.media_title || t.playing) : t.idle;
     card.querySelector(".status").textContent = known ? [a.media_artist, a.media_album_name].filter(Boolean)[0] ?? "" : "";
@@ -1738,6 +1804,10 @@ class OrigamiMusic extends OrigamiBase {
     if (card._fav !== uri + "|" + fav) { card._fav = uri + "|" + fav; card.querySelector(".hslot").replaceChildren(this._heart(uri, "big")); }
     card.querySelector(".dev span").textContent = group.join(" + ");
     card.querySelector(".devn").textContent = group.length > 1 ? group.length + t.speakersN : "";
+    const mixb = card.querySelector('[data-c="mix"]');
+    mixb.hidden = !(known && typeof uri === "string" && !/^radiobrowser/.test(uri));
+    this._setIcon(mixb, "mdi:radio-tower");
+    mixb.title = t.mix;
     this._setIcon(card.querySelector('[data-c="more"]'), "mdi:dots-horizontal");
     const sh = card.querySelector('[data-c="shuffle"]');
     this._setIcon(sh, a.shuffle ? "mdi:shuffle" : "mdi:shuffle-disabled");
@@ -1912,7 +1982,9 @@ const ORIGAMI_MUSIC_CSS = `
     align-items: center; justify-content: center; cursor: pointer; color: var(--primary-text-color); --mdc-icon-size: 24px; }
   .prog { display: flex; flex-direction: column; gap: 6px; }
   .prog[hidden] { display: none; }
+  ha-card.nowp .prog { cursor: pointer; padding: 6px 0; margin: -6px 0; touch-action: none; }
   .bar { height: 6px; border-radius: 999px; background: var(--fill-subtle, #ebe9e5); overflow: hidden; }
+  ha-card.nowp .bar { height: 8px; }
   .bar i { display: block; height: 6px; border-radius: 999px; background: var(--toggle-on, #5e5a54); }
   .times { display: flex; justify-content: space-between; font-size: 12px; font-weight: 600; color: var(--secondary-text-color); font-variant-numeric: tabular-nums; }
   .ctrls { display: flex; align-items: center; justify-content: space-between; padding: 0 8px; }
@@ -2090,6 +2162,9 @@ const ORIGAMI_MUSIC_CSS = `
   .lrow .thumb { width: 60px; height: 60px; border-radius: 14px; box-shadow: 0 2px 8px rgba(74, 70, 64, 0.10); --mdc-icon-size: 26px; }
   .thumb.round { border-radius: 999px; }
   .lrow .title { font-size: 16px; } .lrow .sub { font-size: 13px; font-weight: 600; }
+  .qadd { flex: none; width: 40px; height: 40px; border-radius: 13px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: var(--fill-subtle, #f1efeb); color: var(--primary-text-color); --mdc-icon-size: 20px; }
+  .qadd:active { transform: scale(0.9); }
   .favtile { background: color-mix(in srgb, #c9785c 18%, var(--ha-card-background, #fff)); color: #c9785c; }
   .mal .thumb { background: var(--fill-subtle, #eae8e4); }
   .x { width: 40px; height: 40px; flex: none; display: flex; align-items: center; justify-content: center; color: var(--secondary-text-color);
@@ -2133,6 +2208,10 @@ const ORIGAMI_MUSIC_CSS = `
   /* Group volume of the now playing pop-up, and the also play on grid (group) */
   .vrow { display: flex; align-items: center; gap: 8px; }
   .vrow .vol { flex: 1 1 auto; }
+  .mixb { flex: none; width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: var(--fill-subtle, #f1efeb); color: var(--primary-text-color); --mdc-icon-size: 22px; }
+  .mixb[hidden] { display: none; }
+  .mixb:active { transform: scale(0.95); }
   .vmore { flex: none; width: 48px; height: 48px; border-radius: 16px; background: var(--fill-subtle, #f1efeb); display: flex;
     align-items: center; justify-content: center; cursor: pointer; color: var(--primary-text-color); --mdc-icon-size: 24px; }
   .vmore.open { background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); }
@@ -2164,6 +2243,13 @@ const ORIGAMI_MUSIC_CSS = `
     box-shadow: var(--card-elevation-flat, 0 4px 12px rgba(74, 70, 64, 0.08)); }
   .gchip.on ha-icon { color: var(--state-media_player-active-color, #6f93ab); }
   .gchip.na { opacity: var(--opacity-disabled, 0.45); }
+  ha-card.group.moving .gchip:not(.na) { background: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 16%, var(--ha-card-background, #fff));
+    color: color-mix(in srgb, var(--state-media_player-active-color, #6f93ab) 65%, var(--primary-text-color, #4a4640)); }
+  .gmove { display: flex; align-items: center; justify-content: center; gap: 6px; height: 44px; margin-top: 10px; cursor: pointer;
+    border-radius: 16px; border: 1.5px dashed color-mix(in srgb, var(--primary-text-color, #4a4640) 22%, transparent);
+    font-size: 14px; font-weight: 700; color: var(--secondary-text-color); --mdc-icon-size: 20px; }
+  .gmove[hidden] { display: none; }
+  .gmove.on { border-style: solid; background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); border-color: transparent; }
   .gchip.all { background: none; border: 1.5px dashed color-mix(in srgb, var(--primary-text-color, #4a4640) 22%, transparent); }
 `;
 
