@@ -425,3 +425,14 @@ test("in the library, a podcast plays instead of trying to open (Music Assistant
     data: expect.objectContaining({ media_content_id: "library://podcast/1", enqueue: "replace" }) }));
   expect(await ws(page, "media_player/browse_media")).not.toContainEqual(expect.objectContaining({ media_content_id: "library://podcast/1" }));
 });
+
+test("Clear up next removes the upcoming tracks without stopping the current one", async ({ page }) => {
+  await open(page, "fixture=queue");
+  const q = card(page, "queue");
+  await expect(q.locator(".qclear")).toBeVisible();
+  await q.locator(".qclear").click();
+  const cmds = await ws(page, "bubble_card_tools/ma_queue_command");
+  expect(cmds.filter((c) => c.command === "delete_item").map((c) => c.item_id).sort()).toEqual(["q1", "q2", "q3", "q4", "q5"]);
+  expect(cmds).not.toContainEqual(expect.objectContaining({ command: "clear" }));
+  await expect(q.locator(".toast")).toHaveText("Up next cleared");
+});

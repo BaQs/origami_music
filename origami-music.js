@@ -133,7 +133,7 @@ const ORIGAMI_MUSIC_TEXT = {
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
     sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
-    speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre",
+    speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre", clearNext: "Vider la suite", cleared: "Suite vidée",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
     nogroup: "sans groupe", solo: " ne peut pas rejoindre de groupe", sololead: " joue seule : pas de groupe possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artiste", track: "Titre", radio: "Radio", podcast: "Podcast", audiobook: "Livre audio" },
@@ -158,7 +158,7 @@ const ORIGAMI_MUSIC_TEXT = {
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
     sent: "Sent to ", playnext: "Will play next on ", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
-    speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track",
+    speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track", clearNext: "Clear up next", cleared: "Up next cleared",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
     nogroup: "no groups", solo: " can't join a group", sololead: " plays alone, so no group is possible",
     kind: { playlist: "Playlist", album: "Album", artist: "Artist", track: "Track", radio: "Radio", podcast: "Podcast", audiobook: "Audiobook" },
@@ -863,6 +863,19 @@ class OrigamiMusic extends OrigamiBase {
     if (this._config.select) this._call("input_select.select_option", { entity_id: this._config.select, option: cast });
   }
 
+  // Clear up next: delete the tracks after the current one (in parallel, by item_id) without stopping playback.
+  // MA clear() would empty the whole queue and stop the player, which is not what is wanted here.
+  _clearUpNext() {
+    const m = this._m, t = this._t();
+    if (this._clearing || !m.qid || !m.items) return;
+    const rows = queueView(m.items, this._ctx?.cur, m.items.length + 1).rows.filter((r) => !r.current && r.it?.queue_item_id);
+    if (!rows.length) return;
+    this._clearing = true;
+    Promise.allSettled(rows.map((r) => this._hass.callWS({ type: "bubble_card_tools/ma_queue_command", queue_id: m.qid, command: "delete_item", item_id: r.it.queue_item_id })))
+      .then(() => this._toast(t.cleared))
+      .finally(() => { this._clearing = false; m.at = 0; this._sig = null; this._update(); });
+  }
+
   // The tracks after the current one; the track count opens the longer list
   _renderQueue() {
     if (!this.shadowRoot || !this._ctx) return;
@@ -874,13 +887,17 @@ class OrigamiMusic extends OrigamiBase {
     const sig = ["queue", this._ctx.qid, this._ctx.cur, rows.map((r) => r.it.queue_item_id).join(","), v.upcoming, m.err ?? "", this._open ? 1 : 0, m.items ? 1 : 0].join("|");
     if (sig === this._sig) return;
     this._sig = sig;
-    const card = this._skel("queue", '<div class="hd"><span class="ht"></span><span class="hv link"></span></div><div class="lst"></div><div class="toast"></div>',
+    const card = this._skel("queue", '<div class="hd"><span class="ht"></span><span class="qclear" data-act="queue-clear" hidden></span><span class="hv link"></span></div><div class="lst"></div><div class="toast"></div>',
       (ev) => {
+        if (ev.target.closest('[data-act="queue-clear"]')) { this._clearUpNext(); return; }
         if (ev.target.closest(".link")) { this._open = !this._open; this._sig = null; this._renderQueue(); return; }
         this._onClick(ev);
       });
     this.style.display = empty ? "none" : "";
     card.querySelector(".ht").textContent = t.upnext;
+    const clear = card.querySelector(".qclear");
+    clear.hidden = v.upcoming === 0;
+    if (!clear.firstChild) clear.append(this._icon("mdi:playlist-remove"), this._el("span", null, t.clearNext));
     card.querySelector(".hv").textContent = v.upcoming > 0 ? v.upcoming + (v.upcoming > 1 ? t.tracks : t.track1) + (this._open ? " ‹" : " ›") : "";
     const lst = card.querySelector(".lst");
     if (m.err) { lst.replaceChildren(this._el("div", "hint error", t.err + m.err)); return; }
@@ -1935,6 +1952,10 @@ const ORIGAMI_MUSIC_CSS = `
   .chk.leader { cursor: default; }
   .spk.off .chk { visibility: hidden; }
   .chk.na { border-style: dashed; opacity: var(--opacity-disabled, 0.45); cursor: default; color: var(--secondary-text-color); --mdc-icon-size: 18px; }
+  .qclear { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; margin-right: 10px; cursor: pointer;
+    font-size: 13px; font-weight: 700; color: var(--secondary-text-color); --mdc-icon-size: 18px; }
+  .qclear[hidden] { display: none; }
+  .qclear:active { opacity: 0.6; }
   ha-card.queue .lst { border-radius: 26px; background: var(--fill-subtle, #eae8e4); padding: 8px; display: flex; flex-direction: column; }
   ha-card.queue .row { padding: 8px; min-height: 0; }
   ha-card.queue .thumb { width: 48px; height: 48px; border-radius: 14px; background: var(--ha-card-background, #fff); box-shadow: 0 2px 6px rgba(74, 70, 64, 0.08); }
