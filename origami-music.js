@@ -131,7 +131,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Livres audio" },
     cls: { artist: "Artistes", album: "Albums", track: "Titres", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
-    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", goArtist: "Aller à l'artiste", seeInApp: "Voir dans Musique", shuffleplay: "Aléatoire", qRemove: "Retirer de la file", qNext: "Lire ensuite", volume: "Volume", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
+    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", topPlayed: "Lecture de {n} titres", goArtist: "Aller à l'artiste", seeInApp: "Voir dans Musique", shuffleplay: "Aléatoire", qRemove: "Retirer de la file", qNext: "Lire ensuite", volume: "Volume", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
     speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre", clearNext: "Vider la suite", cleared: "Suite vidée",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
@@ -156,7 +156,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Audiobooks" },
     cls: { artist: "Artists", album: "Albums", track: "Tracks", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
-    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", goArtist: "Go to artist", seeInApp: "See in Music", shuffleplay: "Shuffle", qRemove: "Remove from queue", qNext: "Play next", volume: "Volume", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
+    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", topPlayed: "Playing {n} tracks", goArtist: "Go to artist", seeInApp: "See in Music", shuffleplay: "Shuffle", qRemove: "Remove from queue", qNext: "Play next", volume: "Volume", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
     speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track", clearNext: "Clear up next", cleared: "Up next cleared",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
@@ -1201,10 +1201,13 @@ class OrigamiMusic extends OrigamiBase {
     fn();
   }
 
-  _head(title, link, data) {
+  _head(title, link, data, play) {
     const h = this._el("div", "hd");
     h.append(this._el("span", "ht", title));
-    if (link) { const l = this._el("span", "hv lien", link); Object.assign(l.dataset, data ?? {}); h.append(l); }
+    const right = this._el("div", "hdr");
+    if (play) { const b = this._el("div", "pplay"); Object.assign(b.dataset, play); b.title = this._t().playAll; b.append(this._icon("mdi:play")); right.append(b); }
+    if (link) { const l = this._el("span", "hv lien", link); Object.assign(l.dataset, data ?? {}); right.append(l); }
+    if (right.childElementCount) h.append(right);
     return h;
   }
 
@@ -1475,7 +1478,7 @@ class OrigamiMusic extends OrigamiBase {
         more.append(this._el("span", null, this._topOpen ? t.topLess : t.top + total), this._icon(this._topOpen ? "mdi:chevron-up" : "mdi:chevron-down"));
         box.append(more);
       }
-      secT.replaceChildren(this._head(t.trends), chips, box);
+      secT.replaceChildren(this._head(t.trends, null, null, { act: "play-trend" }), chips, box);
     });
 
     const secRa = pane.querySelector(".radios");
@@ -1507,7 +1510,7 @@ class OrigamiMusic extends OrigamiBase {
           this._el("div", "ckind", (it.artists ?? []).map((x) => x?.name).filter(Boolean).join(", ")));
         return c;
       }));
-      const head = this._head(t.favs, t.all, { act: "goto", k: "favs" });
+      const head = this._head(t.favs, t.all, { act: "goto", k: "favs" }, { act: "play-favs" });
       head.querySelector(".ht").append(this._icon("mdi:heart"));
       secF.replaceChildren(head, shelf);
     });
@@ -1585,6 +1588,7 @@ class OrigamiMusic extends OrigamiBase {
       const out = [];
       // Only local library and radios came back (Spotify did not contribute): say so, instead of looking complete
       if (!s.results.some((r) => /spotify|deezer|tidal|qobuz|apple|ytmusic/i.test(r.media_content_id ?? r.uri ?? ""))) out.push(this._el("div", "hint", t.localOnly));
+      if (s.results.some((r) => r?.media_class === "track" && r?.media_content_id)) out.push(this._head(s.q, null, null, { act: "play-search" }));
       for (const [cls, items] of groupResults(s.results)) {
         out.push(this._el("div", "section", t.cls[cls] ?? cls));
         out.push(...items.map((c) => this._itemRow(c)));
@@ -1793,6 +1797,9 @@ class OrigamiMusic extends OrigamiBase {
     else if (d.act === "home-vol") { this._homeVolOpen = !this._homeVolOpen; this._renderApp(); }
     else if (d.act === "go-artist") this._goToArtist(d.name);
     else if (d.act === "shuffle-play") { if (ma) this._call("media_player.shuffle_set", { entity_id: ma, shuffle: true }); this._play(d.id, d.type, "replace"); }
+    else if (d.act === "play-favs") this._playList((window.__origamiMusicLists?.favs?.items ?? []).map((x) => x.uri).filter(Boolean));
+    else if (d.act === "play-search") this._playList((this._search.results ?? []).filter((r) => r?.media_class === "track").map((r) => r.media_content_id).filter(Boolean));
+    else if (d.act === "play-trend") this._playTrendAll();
     else if (d.act === "fav-play") {
       // The tapped track and the favorites after it, like a playlist
       const uris = (window.__origamiMusicLists?.favs?.items ?? []).slice(Number(d.i)).map((x) => x.uri).filter(Boolean);
@@ -1814,6 +1821,47 @@ class OrigamiMusic extends OrigamiBase {
       if (this._tab === "search" && !this._stack.length && ["play", "next", "open", "play-now"].includes(d.act)) this._remember(d.id);
       this._onClick(ev);
     }
+  }
+
+  // Play a ready list of uris as one queue (replace), like Spotify's section Play. Uris are already known.
+  _playList(uris) {
+    const ma = this._ctx?.ma, t = this._t();
+    if (!ma || !uris?.length) return;
+    this._hass.callService("music_assistant", "play_media", { entity_id: ma, media_id: uris, enqueue: "replace" })
+      .then(() => this._toast(t.topPlayed.replace("{n}", uris.length)))
+      .catch((e) => this._toast(t.err + (e?.message ?? e)));
+  }
+
+  // Play the whole chart: resolve each track one at a time within a time budget, then one replace. Not a burst
+  // (serial, like a user tapping), and the budget caps the damage if a throttle salve hits mid-way.
+  async _playTrendAll() {
+    const t = this._t(), ma = this._ctx?.ma, cfg = this._config;
+    if (!ma || this._resolving) return;
+    const zones = Object.keys(cfg.trends ?? {});
+    const sensor = this._hass.states[cfg.trends?.[zones.includes(this._zone) ? this._zone : zones[0]]];
+    const list = (sensor?.attributes?.tracks ?? []).slice(0, 20);
+    if (!list.length) return;
+    this._resolving = true;
+    this._toast(t.wait);
+    const uris = [], t0 = Date.now();
+    try {
+      for (const it of list) {
+        const left = 12000 - (Date.now() - t0);
+        if (left <= 0) break;
+        try {
+          // Race each search against the remaining budget: during a Spotify salve search_media hangs (like in
+          // _playTrend), so without this a single stuck call would freeze the loop and leave _resolving stuck.
+          const search = this._hass.callWS({ type: "media_player/search_media", entity_id: ma, search_query: it.artist + " " + it.title });
+          const r = await Promise.race([search, new Promise((_, rej) => setTimeout(() => rej(new Error("timeout")), left))]);
+          const best = pickBrowseTrack(Array.isArray(r?.result) ? r.result : (r?.result?.children ?? []), it.title, it.artist);
+          if (best) uris.push(best.media_content_id);
+        } catch (e) { if (e?.message === "timeout") break; /* else skip this track */ }
+      }
+      if (!uris.length) { this._toast(t.searchSlow); return; }
+      await this._hass.callService("music_assistant", "play_media", { entity_id: ma, media_id: uris, enqueue: "replace" });
+      this._toast(t.topPlayed.replace("{n}", uris.length));
+    } catch (e) { this._toast(t.err + (e?.message ?? e)); }
+    finally { this._resolving = false; }
   }
 
   // A trending track: Music Assistant searches "artist title" on its providers, then the best match plays.
@@ -2169,6 +2217,10 @@ const ORIGAMI_MUSIC_CSS = `
   .sec { display: flex; flex-direction: column; gap: 12px; }
   .sec:empty { display: none; }
   ha-card.app .hd { padding: 4px 4px 0 0; }
+  .hdr { display: flex; align-items: center; gap: 10px; }
+  .pplay { flex: none; width: 36px; height: 36px; border-radius: 999px; display: flex; align-items: center; justify-content: center; cursor: pointer;
+    background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); --mdc-icon-size: 22px; }
+  .pplay:active { transform: scale(0.92); }
   ha-card.app .ht { font-size: 21px; display: flex; align-items: center; gap: 8px; --mdc-icon-size: 20px; }
   ha-card.app .ht ha-icon { color: #c9785c; }
   .rcard { display: flex; align-items: center; gap: 14px; padding: 14px; border-radius: 26px; cursor: pointer;

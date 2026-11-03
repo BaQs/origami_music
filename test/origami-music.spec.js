@@ -544,3 +544,29 @@ test("See in Music navigates from the player to the music pop-up", async ({ page
   await card(page, "nowp").locator('[data-c="seeapp"]').click();
   expect(await page.evaluate(() => location.hash)).toBe("#music");
 });
+
+test("the favorites section plays every favorite as one queue", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator(".favs .pplay").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ enqueue: "replace", media_id: expect.arrayContaining(["library://track/101"]) }) }));
+});
+
+test("search results play every track as one queue", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator('.tab2[data-tab="search"]').click();
+  await app.locator(".search input").fill("golden");
+  await app.locator(".sres .pplay").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
+    data: expect.objectContaining({ enqueue: "replace", media_id: expect.arrayContaining(["library://track/100", "spotify--x://track/sn1"]) }) }));
+});
+
+test("the trending section plays the whole chart as one queue", async ({ page }) => {
+  await open(page, "fixture=app");
+  const app = card(page, "app");
+  await app.locator(".trends .pplay").click();
+  await expect(app.locator(".toast")).toHaveText("Playing 7 tracks");
+  expect((await calls(page)).some((c) => c.service === "play_media" && c.data.enqueue === "replace" && Array.isArray(c.data.media_id))).toBe(true);
+});
