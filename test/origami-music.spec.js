@@ -570,3 +570,29 @@ test("the trending section plays the whole chart as one queue", async ({ page })
   await expect(app.locator(".toast")).toHaveText("Playing 7 tracks");
   expect((await calls(page)).some((c) => c.service === "play_media" && c.data.enqueue === "replace" && Array.isArray(c.data.media_id))).toBe(true);
 });
+
+test("the speaker bar offers a jump to the speaker that is playing elsewhere", async ({ page }) => {
+  await open(page, "fixture=app&elsewhere");
+  const app = card(page, "app");
+  await app.locator(".devbar .devjump").click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "select_option",
+    data: expect.objectContaining({ entity_id: "input_select.speaker", option: "media_player.kitchen_speaker" }) }));
+});
+
+test("All groups only the free speakers and leaves a busy one alone", async ({ page }) => {
+  await open(page, "fixture=group&elsewhere");
+  const g = card(page, "group");
+  await g.locator('.gchip[data-g="all"]').click();
+  const join = (await calls(page)).find((c) => c.service === "join");
+  expect(join.data.group_members).toEqual(expect.arrayContaining(["media_player.bedroom", "media_player.bathroom"]));
+  expect(join.data.group_members).not.toContain("media_player.kitchen");
+  await expect(g.locator(".toast")).toHaveText("Busy speakers skipped");
+});
+
+test("a busy speaker can still be grouped with an individual tap", async ({ page }) => {
+  await open(page, "fixture=group&elsewhere");
+  const g = card(page, "group");
+  await g.locator('.gchip[data-p="media_player.kitchen"]').click();
+  expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "join",
+    data: expect.objectContaining({ group_members: ["media_player.kitchen"] }) }));
+});

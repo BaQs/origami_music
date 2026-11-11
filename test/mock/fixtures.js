@@ -52,7 +52,7 @@ let ORIGAMI_LOCAL_SEARCH = false;
 const item = (media_class, title, id, n) => ({ media_class, media_content_type: "music", media_content_id: id, title,
                                                 thumbnail: n ? cover(n) : null, can_play: true, can_expand: media_class === "artist" });
 
-const states = (idle, stopped) => {
+const states = (idle, stopped, elsewhere) => {
   const now = new Date().toISOString();
   const playing = idle ? { state: "idle" } : {
     state: "playing", media_title: "Golden Hour", media_artist: "The Lanterns", media_album_name: "Evening Lights",
@@ -74,6 +74,12 @@ const states = (idle, stopped) => {
     "sensor.charts_france": { state: now, attributes: { ...chart(CHARTS.france, 1), previous: [2, 1, 3, 7, 4] } },
     "sensor.charts_world": { state: now, attributes: chart(CHARTS.world, 11) },
   };
+  // elsewhere: the chosen speaker (living room) sits idle while another speaker (kitchen) plays on its own
+  if (elsewhere) {
+    out["media_player.living_room"] = { state: "idle", attributes: { friendly_name: "Living room", volume_level: 0.32, active_queue: "queue-living-room", group_members: [] } };
+    out["media_player.kitchen"] = { state: "playing", attributes: { friendly_name: "Kitchen", volume_level: 0.25,
+      media_title: "Golden Hour", media_artist: "The Lanterns", entity_picture: "/test/mock/img/cover1.svg", media_duration: 214, media_position: 40, media_position_updated_at: now, group_members: [] } };
+  }
   return out;
 };
 
@@ -141,7 +147,7 @@ const slowWs = { ...ws, "media_player/search_media": (m) => new Promise((r) => s
 export async function show(name, params, column) {
   ORIGAMI_EMPTY_SEARCH = params.has("emptysearch");
   ORIGAMI_LOCAL_SEARCH = params.has("localsearch");
-  const hass = createHass({ states: states(params.has("idle"), params.has("stopped")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
+  const hass = createHass({ states: states(params.has("idle"), params.has("stopped"), params.has("elsewhere")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
   if (params.get("error")) hass.callWS = () => Promise.reject(new Error(params.get("error")));
   const extra = params.get("solo") ? { solo: [params.get("solo")] } : {};
   const add = (config) => mount("origami-music", { ...BASE, ...extra, ...config }, hass, column);

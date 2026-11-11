@@ -143,7 +143,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Tes artistes", liked: "Titres favoris", recentSearches: "Recherches récentes", clear: "Tout effacer", browse: "Parcourir",
     added: "Ajouts récents", sortRecent: "Récents", sortAZ: "De A à Z", playAll: "Tout lire", openMA: "Ouvrir Music Assistant",
     like: "Ajouté à tes favoris", unlike: "Retiré de tes favoris", notFound: "Introuvable pour l'instant : ", looking: "Recherche de ",
-    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…", playingOn: "Lecture sur ", searchSlow: "Spotify n'a pas répondu, réessaie plus tard", localOnly: "Spotify n'a pas répondu : résultats locaux seulement",
+    speakersN: " enceintes", inplay: "Lecture en cours", forget: "Effacer ", wait: "Patiente un instant…", playingOn: "Lecture sur ", switchTo: "Basculer sur ", allBusy: "Enceintes occupées ignorées", searchSlow: "Spotify n'a pas répondu, réessaie plus tard", localOnly: "Spotify n'a pas répondu : résultats locaux seulement",
     group: "Groupe", volumes: "Volume de chaque enceinte", quiet: "Doux", medium: "Moyen", loud: "Fort",
     alsoOn: "Écouter aussi sur", ungroup: "Dégrouper", allSpeakers: "Toutes",
   },
@@ -168,7 +168,7 @@ const ORIGAMI_MUSIC_TEXT = {
     artists: "Your artists", liked: "Liked songs", recentSearches: "Recent searches", clear: "Clear all", browse: "Browse",
     added: "Recently added", sortRecent: "Recent", sortAZ: "A to Z", playAll: "Play all", openMA: "Open Music Assistant",
     like: "Added to your favorites", unlike: "Removed from your favorites", notFound: "Not found for now: ", looking: "Looking for ",
-    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…", playingOn: "Playing on ", searchSlow: "Spotify did not respond, try again later", localOnly: "Spotify did not respond: local results only",
+    speakersN: " speakers", inplay: "Now playing", forget: "Remove ", wait: "One moment…", playingOn: "Playing on ", switchTo: "Switch to ", allBusy: "Busy speakers skipped", searchSlow: "Spotify did not respond, try again later", localOnly: "Spotify did not respond: local results only",
     group: "Group", volumes: "Volume of each speaker", quiet: "Quiet", medium: "Medium", loud: "Loud",
     alsoOn: "Also play on", ungroup: "Ungroup", allSpeakers: "All",
   },
@@ -1282,11 +1282,14 @@ class OrigamiMusic extends OrigamiBase {
     const leaderAlone = Object.entries(cfg.players ?? {}).some(([cast, p]) => p === leader && alone(cast, p));
     const members = lead[leader] ?? [];
     const chips = Object.entries(cfg.players ?? {}).filter(([, p]) => p !== leader).map(([cast, p]) => {
-      const off = ["unavailable", "unknown"].includes(S[p]?.state ?? "unavailable");
+      const st = S[p], off = ["unavailable", "unknown"].includes(st?.state ?? "unavailable");
       const on = members.includes(p);
-      return { p, name: names[p] ?? p, on, off, solo: alone(cast, p), na: !on && (off || alone(cast, p) || leaderAlone) };
+      // Busy: already playing its own thing, or on a Bluetooth or TV input. "All" leaves it alone, an individual tap still groups it.
+      const busy = ["playing", "buffering"].includes(st?.state) || /bluetooth|optical|coax|hdmi|line|aux/i.test(String(st?.attributes?.source ?? ""));
+      return { p, name: names[p] ?? p, on, off, busy, solo: alone(cast, p), na: !on && (off || alone(cast, p) || leaderAlone) };
     });
-    return { leader, leaderAlone, members, chips, free: chips.filter((c) => !c.on && !c.na).map((c) => c.p) };
+    return { leader, leaderAlone, members, chips, busy: chips.filter((c) => c.busy && !c.on && !c.na).length,
+      free: chips.filter((c) => !c.on && !c.na && !c.busy).map((c) => c.p) };
   }
 
   _renderGroup() {
@@ -1333,7 +1336,11 @@ class OrigamiMusic extends OrigamiBase {
       return;
     }
     if (action === "split") { if (g.members.length) this._call("media_player.unjoin", { entity_id: g.members }); return; }
-    if (action === "all") { if (g.free.length) this._call("media_player.join", { entity_id: g.leader, group_members: g.free }); return; }
+    if (action === "all") {
+      if (g.free.length) this._call("media_player.join", { entity_id: g.leader, group_members: g.free });
+      if (g.busy) this._toast(t.allBusy);
+      return;
+    }
     const c = g.chips.find((x) => x.p === p);
     if (!c) return;
     if (c.na) {
@@ -1686,15 +1693,39 @@ class OrigamiMusic extends OrigamiBase {
   }
 
   // The speaker bar: says on which speaker a tap will play, and opens "listen on" to change it
+  // The speaker that plays when the chosen one is idle: the sole playing group leader, a group counted once. Null otherwise.
+  _playingElsewhere() {
+    const cfg = this._config, S = this._hass.states, chosen = this._ctx?.ma;
+    // Paused counts as busy too: the chosen speaker was paused on purpose, so the jump chip would only nag.
+    if (!cfg.select || !cfg.players || ["playing", "buffering", "paused"].includes(this._ctx?.st?.state)) return null;
+    const hits = Object.entries(cfg.players).filter(([, p]) => {
+      const st = S[p], gm = st?.attributes?.group_members ?? [];
+      return ["playing", "buffering"].includes(st?.state) && (gm.length ? gm[0] : p) === p && p !== chosen;
+    });
+    if (hits.length !== 1) return null;
+    const [cast, p] = hits[0];
+    return { cast, ma: p, name: this._names()[p] ?? p };
+  }
+
   _renderDevbar(bar) {
     const t = this._t(), path = this._config.speakers_path;
     const group = this._groupNames();
     const label = group.length ? group.join(" + ") : this._speakerName(this._ctx.chosen, this._ctx.ma);
     bar.hidden = !path || !label;
     if (bar.hidden) return;
-    this._paint(bar, "dev|" + label, () => {
+    const other = this._playingElsewhere();
+    this._paint(bar, ["dev", label, other?.cast ?? ""].join("|"), () => {
       bar.replaceChildren(this._icon("mdi:speaker"), this._el("span", "devpre", t.playingOn),
-        this._el("span", "devname", label), this._icon("mdi:chevron-down"));
+        this._el("span", "devname", label));
+      // Chosen speaker idle while another plays: offer a jump to it, like Origami 3's title chips, without switching on its own
+      if (other) {
+        const jump = this._el("div", "devjump");
+        Object.assign(jump.dataset, { act: "pick-playing", cast: other.cast });
+        jump.title = t.switchTo + other.name;
+        jump.append(this._icon("mdi:play"), this._el("span", null, other.name));
+        bar.append(jump);
+      }
+      bar.append(this._icon("mdi:chevron-down"));
       bar.dataset.act = "go"; bar.dataset.path = path;
     });
   }
@@ -1786,6 +1817,7 @@ class OrigamiMusic extends OrigamiBase {
     if (d.act === "mini") this._go(cfg.player_path);
     else if (d.act === "mini-pp") { if (ma) this._call("media_player.media_play_pause", { entity_id: ma }); }
     else if (d.act === "resume") { if (ma) this._call("media_player.media_play", { entity_id: ma }); }
+    else if (d.act === "pick-playing") { if (cfg.select && d.cast) this._call("input_select.select_option", { entity_id: cfg.select, option: d.cast }); }
     else if (d.act === "fav-toggle") this._favToggle(d.id);
     else if (d.act === "queue-add") this._play(d.id, "music", "add");
     else if (d.act === "zone") { this._zone = d.zone; this._renderApp(); }
@@ -2209,6 +2241,10 @@ const ORIGAMI_MUSIC_CSS = `
   .devbar:active { transform: scale(0.99); }
   .devbar .devpre { font-weight: 600; color: var(--secondary-text-color); }
   .devbar .devname { flex: 1 1 auto; min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .devbar .devjump { flex: none; display: flex; align-items: center; gap: 4px; max-width: 45%; padding: 3px 10px 3px 6px; border-radius: 999px;
+    background: var(--toggle-on, #5e5a54); color: var(--text-color-active, #fff); font-weight: 600; --mdc-icon-size: 16px; }
+  .devbar .devjump span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+  .devbar .devjump:active { transform: scale(0.94); }
   .tab2 { height: 40px; box-sizing: border-box; padding: 0 18px; border-radius: 999px; display: flex; align-items: center; cursor: pointer;
     background: var(--fill-subtle, #eae8e4); color: var(--primary-text-color); font-size: 15px; font-weight: 700; user-select: none;
     -webkit-tap-highlight-color: transparent; }
