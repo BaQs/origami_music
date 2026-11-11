@@ -413,7 +413,7 @@ test("a normal search does not show the local-only hint", async ({ page }) => {
   await expect(app.locator(".sres .hint")).toHaveCount(0);
 });
 
-test("in the library, a podcast plays instead of trying to open (Music Assistant rejects browsing it)", async ({ page }) => {
+test("in the library, a podcast plays and opens the player so its episodes show", async ({ page }) => {
   await open(page, "fixture=app");
   const app = card(page, "app");
   await app.locator('.tab2[data-tab="lib"]').click();
@@ -424,6 +424,7 @@ test("in the library, a podcast plays instead of trying to open (Music Assistant
   expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "play_media",
     data: expect.objectContaining({ media_content_id: "library://podcast/1", enqueue: "replace" }) }));
   expect(await ws(page, "media_player/browse_media")).not.toContainEqual(expect.objectContaining({ media_content_id: "library://podcast/1" }));
+  expect(await page.evaluate(() => location.hash)).toBe("#player");
 });
 
 test("Clear up next removes the upcoming tracks without stopping the current one", async ({ page }) => {
@@ -528,15 +529,15 @@ test("opening a collection offers Shuffle, which shuffles then plays", async ({ 
   expect(done.some((c) => c.service === "play_media" && c.data.media_content_id === "library://album/1")).toBe(true);
 });
 
-test("a queue track can be removed and moved to play next", async ({ page }) => {
+test("a queue track can be removed, and a tap on a row jumps to it", async ({ page }) => {
   await open(page, "fixture=queue");
   const q = card(page, "queue");
   await q.locator(".row", { hasText: "Paper Boats" }).locator('[data-act="q-remove"]').click();
   expect(await ws(page, "bubble_card_tools/ma_queue_command")).toContainEqual(expect.objectContaining({ command: "delete_item", item_id: "q2" }));
   await open(page, "fixture=queue");
   const q2 = card(page, "queue");
-  await q2.locator(".row", { hasText: "Northern Line" }).locator('[data-act="q-next"]').click();
-  expect(await ws(page, "bubble_card_tools/ma_queue_command")).toContainEqual(expect.objectContaining({ command: "move_next", item_id: "q3" }));
+  await q2.locator(".row", { hasText: "Northern Line" }).click();
+  expect(await ws(page, "bubble_card_tools/ma_queue_command")).toContainEqual(expect.objectContaining({ command: "play_index" }));
 });
 
 test("See in Music navigates from the player to the music pop-up", async ({ page }) => {

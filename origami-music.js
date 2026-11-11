@@ -131,7 +131,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Livres audio" },
     cls: { artist: "Artistes", album: "Albums", track: "Titres", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Livres audio", radio: "Radios", channel: "Radios", other: "Autres" },
-    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", topPlayed: "Lecture de {n} titres", goArtist: "Aller à l'artiste", seeInApp: "Voir dans Musique", shuffleplay: "Aléatoire", qRemove: "Retirer de la file", qNext: "Lire ensuite", volume: "Volume", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
+    sent: "Envoyé à ", playnext: "Sera lu ensuite sur ", queued: "Ajouté à la file de ", addQueue: "Ajouter à la file", mix: "Lancer un mix", mixOn: "Mix lancé", moveHere: "Déplacer la lecture vers…", moved: "Lecture déplacée", topPlayed: "Lecture de {n} titres", goArtist: "Aller à l'artiste", seeInApp: "Voir dans Musique", shuffleplay: "Aléatoire", qRemove: "Retirer de la file", qNext: "Lire ensuite", qPlay: "Lire ce titre", volume: "Volume", recent: "Récemment écoutés", resume: "Reprendre", idle: "Rien en lecture",
     nowplaying: "En lecture : ", toplayer: "Lecture", recentf: "Récentes ›", recentm: "Récents ›", books: "Livres",
     speakers: "Enceintes", tick: "cocher pour écouter partout", upnext: "À suivre", tracks: " titres", track1: " titre", clearNext: "Vider la suite", cleared: "Suite vidée",
     leads: "mène le groupe", with: "Avec ", inactive: "Inactive", paused: "En pause", playing: "En lecture", offline: "Hors ligne",
@@ -156,7 +156,7 @@ const ORIGAMI_MUSIC_TEXT = {
            podcasts: "Podcasts", audiobooks: "Audiobooks" },
     cls: { artist: "Artists", album: "Albums", track: "Tracks", playlist: "Playlists", podcast: "Podcasts",
            audiobook: "Audiobooks", radio: "Radio", channel: "Radio", other: "Other" },
-    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", topPlayed: "Playing {n} tracks", goArtist: "Go to artist", seeInApp: "See in Music", shuffleplay: "Shuffle", qRemove: "Remove from queue", qNext: "Play next", volume: "Volume", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
+    sent: "Sent to ", playnext: "Will play next on ", queued: "Added to the queue of ", addQueue: "Add to queue", mix: "Start a mix", mixOn: "Mix started", moveHere: "Move playback to…", moved: "Playback moved", topPlayed: "Playing {n} tracks", goArtist: "Go to artist", seeInApp: "See in Music", shuffleplay: "Shuffle", qRemove: "Remove from queue", qNext: "Play next", qPlay: "Play this", volume: "Volume", recent: "Recently played", resume: "Resume", idle: "Nothing playing",
     nowplaying: "Now playing: ", toplayer: "Player", recentf: "Recent ›", recentm: "Recent ›", books: "Audiobooks",
     speakers: "Speakers", tick: "tick to play everywhere", upnext: "Up next", tracks: " tracks", track1: " track", clearNext: "Clear up next", cleared: "Up next cleared",
     leads: "leads the group", with: "With ", inactive: "Idle", paused: "Paused", playing: "Playing", offline: "Offline",
@@ -417,6 +417,7 @@ class OrigamiMusic extends OrigamiBase {
     else if (d.act === "play") this._play(d.id, d.type, "play");
     else if (d.act === "next") this._play(d.id, d.type, "next");
     else if (d.act === "play-now") this._play(d.id, d.type, "replace");
+    else if (d.act === "podcast-open") { this._play(d.id, "music", "replace"); if (this._config.player_path) this._go(this._config.player_path); }
   }
 
   _el(tag, cls, text) {
@@ -940,7 +941,6 @@ class OrigamiMusic extends OrigamiBase {
     const card = this._skel("queue", '<div class="hd"><span class="ht"></span><span class="qclear" data-act="queue-clear" hidden></span><span class="hv link"></span></div><div class="lst"></div><div class="toast"></div>',
       (ev) => {
         if (ev.target.closest('[data-act="queue-clear"]')) { this._clearUpNext(); return; }
-        const nx = ev.target.closest('[data-act="q-next"]'); if (nx) { this._queueAct("move_next", nx.dataset.id); return; }
         const rm = ev.target.closest('[data-act="q-remove"]'); if (rm) { this._queueAct("delete_item", rm.dataset.id); return; }
         if (ev.target.closest(".link")) { this._open = !this._open; this._sig = null; this._renderQueue(); return; }
         this._onClick(ev);
@@ -957,13 +957,16 @@ class OrigamiMusic extends OrigamiBase {
     lst.replaceChildren(...rows.map((r) => {
       const row = this._el("div", "row");
       Object.assign(row.dataset, { act: "queue-play", index: String(r.index) });
+      row.title = t.qPlay;
       const text = this._el("div", "text");
-      text.append(this._el("div", "title", r.it.name ?? ""),
-        this._el("div", "sub", [r.it.artists, r.it.album].filter((x) => typeof x === "string" && x)[0] ?? ""));
+      const sub = [r.it.artists, r.it.album].filter((x) => typeof x === "string" && x)[0] ?? "";
+      text.append(this._el("div", "title", r.it.name ?? ""), this._el("div", "sub", sub));
       const acts = this._el("div", "qa");
-      const nextb = this._el("div", "qab"); Object.assign(nextb.dataset, { act: "q-next", id: r.it.queue_item_id }); nextb.title = t.qNext; nextb.append(this._icon("mdi:arrow-up"));
+      const dur = formatDuration(r.it.duration);
+      if (dur) acts.append(this._el("span", "qdur", dur));
+      // One action per row: remove. A tap on the row jumps to that track.
       const rmb = this._el("div", "qab"); Object.assign(rmb.dataset, { act: "q-remove", id: r.it.queue_item_id }); rmb.title = t.qRemove; rmb.append(this._icon("mdi:close"));
-      acts.append(nextb, rmb);
+      acts.append(rmb);
       row.append(this._thumb(r.it.image, "mdi:music-note"), text, acts);
       return row;
     }));
@@ -1661,7 +1664,9 @@ class OrigamiMusic extends OrigamiBase {
         const row = this._el("div", "row item lrow");
         const type = it.media_type;
         // Music Assistant exposes radios, podcasts and audiobooks as playable, not browsable (browse_media rejects them)
-        if (["radio", "track", "podcast", "audiobook"].includes(type)) Object.assign(row.dataset, { act: "play-now", id: it.uri, type: "music" });
+        if (["radio", "track"].includes(type)) Object.assign(row.dataset, { act: "play-now", id: it.uri, type: "music" });
+        // Podcasts and audiobooks: Music Assistant can't list episodes without playing, so play and open the queue to pick an episode
+        else if (["podcast", "audiobook"].includes(type)) Object.assign(row.dataset, { act: "podcast-open", id: it.uri });
         else Object.assign(row.dataset, { act: "open", id: it.uri, type, title: it.name ?? "" });
         const thumb = this._thumb(it.image, ORIGAMI_MUSIC_ICONS[type] ?? "mdi:music");
         if (type === "artist") thumb.classList.add("round");
@@ -2398,6 +2403,7 @@ const ORIGAMI_MUSIC_CSS = `
   .vrow .vol { flex: 1 1 auto; }
   .mixb { flex: none; width: 44px; height: 44px; border-radius: 14px; display: flex; align-items: center; justify-content: center; cursor: pointer;
     background: var(--fill-subtle, #f1efeb); color: var(--primary-text-color); --mdc-icon-size: 22px; }
+  .qdur { color: var(--secondary-text-color); font-size: 13px; font-variant-numeric: tabular-nums; }
   .mixb[hidden] { display: none; }
   .mixb:active { transform: scale(0.95); }
   .vmore { flex: none; width: 48px; height: 48px; border-radius: 16px; background: var(--fill-subtle, #f1efeb); display: flex;
