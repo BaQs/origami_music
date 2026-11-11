@@ -16,6 +16,11 @@ const TRACKS = [
 const queue = TRACKS.map(([name, artists, album, n, duration], i) => ({
   queue_item_id: `q${i}`, uri: `library://track/${100 + i}`, name, artists, album, image: cover(n), duration,
 }));
+// A podcast queue in the feed's (unsorted) order, to test the newest-first display
+const podcastQueue = [
+  ["Party Fun - L'intégrale du 14 août", 13377], ["Party Fun - L'intégrale du 20 août", 13200],
+  ["Party Fun - L'intégrale du 11 août", 13010], ["Party Fun - L'intégrale du 18 août", 13100],
+].map(([name, duration], i) => ({ queue_item_id: `p${i}`, uri: `podcastfeed--x://podcast_episode/e${i}`, name, artists: "", album: "", image: cover(2), duration }));
 
 const PLAYLISTS = [["Sunday Morning", 4], ["Focus", 5], ["Dinner Jazz", 6], ["Road Trip", 3]];
 const ALBUMS = [["Evening Lights", "The Lanterns", 1], ["Small Weather", "Mira Vale", 2], ["Transit", "Odd Harbour", 3],
@@ -48,6 +53,7 @@ const SEARCH_TRACKS = [
 
 let ORIGAMI_EMPTY_SEARCH = false;
 let ORIGAMI_LOCAL_SEARCH = false;
+let ORIGAMI_PODCAST_QUEUE = false;
 
 const item = (media_class, title, id, n) => ({ media_class, media_content_type: "music", media_content_id: id, title,
                                                 thumbnail: n ? cover(n) : null, can_play: true, can_expand: media_class === "artist" });
@@ -92,7 +98,7 @@ const ws = {
     : { response: { items: library[service_data.media_type].slice(0, service_data.limit) } }),
   "bubble_card_tools/ma_favorite_state": ({ uri }) => ({ uri, supported: true, favorite: uri === "library://track/101" }),
   "bubble_card_tools/ma_favorite_set": ({ favorite }) => ({ favorite }),
-  "bubble_card_tools/ma_queue_items": { items: queue },
+  "bubble_card_tools/ma_queue_items": () => ({ items: ORIGAMI_PODCAST_QUEUE ? podcastQueue : queue }),
   "bubble_card_tools/ma_queue_command": {},
   "auth/sign_path": ({ path }) => ({ path }),
   "media_player/search_media": ({ search_query = "" }) => {
@@ -147,6 +153,7 @@ const slowWs = { ...ws, "media_player/search_media": (m) => new Promise((r) => s
 export async function show(name, params, column) {
   ORIGAMI_EMPTY_SEARCH = params.has("emptysearch");
   ORIGAMI_LOCAL_SEARCH = params.has("localsearch");
+  ORIGAMI_PODCAST_QUEUE = params.has("podcastqueue");
   const hass = createHass({ states: states(params.has("idle"), params.has("stopped"), params.has("elsewhere")), ws: params.has("slow") ? slowWs : ws, language: params.get("lang") ?? "en" });
   if (params.get("error")) hass.callWS = () => Promise.reject(new Error(params.get("error")));
   const extra = params.get("solo") ? { solo: [params.get("solo")] } : {};

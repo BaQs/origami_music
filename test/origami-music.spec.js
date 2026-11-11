@@ -597,3 +597,14 @@ test("a busy speaker can still be grouped with an individual tap", async ({ page
   expect(await calls(page)).toContainEqual(expect.objectContaining({ service: "join",
     data: expect.objectContaining({ group_members: ["media_player.kitchen"] }) }));
 });
+
+test("a podcast queue lists its episodes newest first", async ({ page }) => {
+  await open(page, "fixture=queue&podcastqueue");
+  const q = card(page, "queue");
+  await expect(q.locator(".row .title").first()).toHaveText(/20 août/);
+  const titles = await q.locator(".row .title").allTextContents();
+  const idx = (s) => titles.findIndex((x) => x.includes(s));
+  expect(idx("20 août")).toBeLessThan(idx("18 août"));
+  expect(idx("18 août")).toBeLessThan(idx("14 août"));
+  expect(idx("14 août")).toBeLessThan(idx("11 août"));
+});

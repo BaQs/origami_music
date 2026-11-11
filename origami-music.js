@@ -38,6 +38,16 @@ function formatDuration(seconds) {
   return h ? h + ":" + pad(m) + ":" + pad(s) : m + ":" + pad(s);
 }
 
+// Best-effort date from a podcast episode title ("… du 14 août", "… 3 janvier 2026"): the queue items carry no date field,
+// so this is the only ordering signal. Returns a comparable yyyymmdd, or 0 when the title has no French date.
+const ORIGAMI_MONTHS = { janvier: 1, "février": 2, fevrier: 2, mars: 3, avril: 4, mai: 5, juin: 6, juillet: 7,
+  "août": 8, aout: 8, septembre: 9, octobre: 10, novembre: 11, "décembre": 12, decembre: 12 };
+function episodeDate(name) {
+  const m = String(name ?? "").toLowerCase().match(/(\d{1,2})\s+(janvier|février|fevrier|mars|avril|mai|juin|juillet|août|aout|septembre|octobre|novembre|décembre|decembre)(?:\s+(\d{4}))?/);
+  if (!m) return 0;
+  return (m[3] ? Number(m[3]) : new Date().getFullYear()) * 10000 + (ORIGAMI_MONTHS[m[2]] ?? 0) * 100 + Number(m[1]);
+}
+
 function safeImage(url) {
   return typeof url === "string" && /^https?:\/\//i.test(url.trim()) ? url.trim() : null;
 }
@@ -933,9 +943,16 @@ class OrigamiMusic extends OrigamiBase {
     const t = this._t(), m = this._m, cfg = this._config;
     const max = this._open ? 30 : Number(cfg.limit) || 4;
     const v = queueView(m.items, this._ctx.cur, max + 1);
-    const rows = v.rows.filter((r) => !r.current).slice(0, max);
+    let rows = v.rows.filter((r) => !r.current).slice(0, max), upcoming = v.upcoming;
+    // Podcasts: episodes arrive in the feed's order (newest buried), so sort the up-next newest-first by the title's date.
+    if ((m.items ?? []).some((it) => /podcast/i.test(it?.uri ?? ""))) {
+      const curIdx = (m.items ?? []).findIndex((it) => it && it.uri === this._ctx.cur);
+      const up = (m.items ?? []).map((it, index) => ({ it, index })).filter((r) => r.index !== curIdx);
+      up.sort((a, b) => episodeDate(b.it?.name) - episodeDate(a.it?.name) || a.index - b.index);
+      rows = up.slice(0, max); upcoming = up.length;
+    }
     const empty = !this._ctx.qid || (m.items != null && !rows.length);
-    const sig = ["queue", this._ctx.qid, this._ctx.cur, rows.map((r) => r.it.queue_item_id).join(","), v.upcoming, m.err ?? "", this._open ? 1 : 0, m.items ? 1 : 0].join("|");
+    const sig = ["queue", this._ctx.qid, this._ctx.cur, rows.map((r) => r.it.queue_item_id).join(","), upcoming, m.err ?? "", this._open ? 1 : 0, m.items ? 1 : 0].join("|");
     if (sig === this._sig) return;
     this._sig = sig;
     const card = this._skel("queue", '<div class="hd"><span class="ht"></span><span class="qclear" data-act="queue-clear" hidden></span><span class="hv link"></span></div><div class="lst"></div><div class="toast"></div>',
@@ -948,9 +965,9 @@ class OrigamiMusic extends OrigamiBase {
     this.style.display = empty ? "none" : "";
     card.querySelector(".ht").textContent = t.upnext;
     const clear = card.querySelector(".qclear");
-    clear.hidden = v.upcoming === 0;
+    clear.hidden = upcoming === 0;
     if (!clear.firstChild) clear.append(this._icon("mdi:playlist-remove"), this._el("span", null, t.clearNext));
-    card.querySelector(".hv").textContent = v.upcoming > 0 ? v.upcoming + (v.upcoming > 1 ? t.tracks : t.track1) + (this._open ? " ‹" : " ›") : "";
+    card.querySelector(".hv").textContent = upcoming > 0 ? upcoming + (upcoming > 1 ? t.tracks : t.track1) + (this._open ? " ‹" : " ›") : "";
     const lst = card.querySelector(".lst");
     if (m.err) { lst.replaceChildren(this._el("div", "hint error", t.err + m.err)); return; }
     if (m.items == null) { lst.replaceChildren(this._el("div", "hint", t.load)); return; }
